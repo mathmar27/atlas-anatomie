@@ -6,7 +6,7 @@ import {DRACOLoader} from 'three/addons/loaders/DRACOLoader.js';
 import {RoomEnvironment} from 'three/addons/environments/RoomEnvironment.js';
 
 const CDN='https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/';
-const EXPORT='export/';
+const EXPORT=/\/atlas\/(index\.html)?$/.test(location.pathname)?'../export/':'export/';
 const $=s=>document.querySelector(s),$$=s=>[...document.querySelectorAll(s)];
 const esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const norm=s=>String(s||'').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,'').replace(/[^a-z0-9]+/g,' ').trim();
@@ -91,7 +91,7 @@ function zoomAt(x,y,f){
   camera.position.sub(zB).multiplyScalar(f).add(zB);controls.target.sub(zB).multiplyScalar(f).add(zB);invalidate()}
 addEventListener('wheel',e=>{if(e.target!==canvas)return;e.preventDefault();e.stopPropagation();
   let dy=e.deltaY;if(e.deltaMode===1)dy*=32;else if(e.deltaMode===2)dy*=600;
-  const k=(e.ctrlKey?.016:.0028)*CFG.zoom*(CFG.invertZoom?-1:1);zoomAt(e.clientX,e.clientY,Math.exp(THREE.MathUtils.clamp(dy*k,-.8,.8)))},{capture:true,passive:false});
+  const k=(e.ctrlKey?.0085:.0015)*CFG.zoom*(CFG.invertZoom?-1:1);zoomAt(e.clientX,e.clientY,Math.exp(THREE.MathUtils.clamp(dy*k,-.45,.45)))},{capture:true,passive:false});
 let tw=null;
 function flyTo(center,radius,dir,ms=650){
   const d=Math.max(radius,.01)/Math.sin(THREE.MathUtils.degToRad(camera.fov/2))*1.18/Math.min(1,camera.aspect*1.15);
@@ -361,7 +361,7 @@ function closeLm(){
   p.lmOn=false;LM.bone=null;LM.list=[];LM.pins=[];LM.sel=LM.hov=-1;apply(p)}
 function selectLm(i,fly){
   if(!LM.bone)return;LM.sel=i===LM.sel&&!fly?-1:i;paintLm();
-  $$('#cardBody .lm').forEach(b=>b.classList.toggle('sel',+b.dataset.lm===LM.sel));
+  $$('#cardBody .lm').forEach(b=>b.classList.toggle('sel',+b.dataset.lm===LM.sel));if(!Q.on)showDesc();
   if(fly&&LM.sel>=0){const L=LM.list[LM.sel];flyTo(L.s,Math.max(LM.bone.radius*.42,.028),L.n);const b=$('#cardBody .lm.sel');if(b)b.scrollIntoView({block:'nearest'})}
   invalidate()}
 function setLmHover(i){if(LM.hov===i)return;LM.hov=i;invalidate()}
@@ -420,14 +420,15 @@ function card(){
   const p=S.sel,el=$('#card');if(!p||Q.on){el.classList.remove('on');sheetOffset();return}
   el.classList.add('on');const lm=CAT.landmarks[p.name],bone=p.sys.id==='squelette',key=p.sys.id+'|'+p.base;
   const type=FUNC[p.mat]?'':TYPE[p.mat]||'';
-  $('#cardHead').innerHTML=`<button class="x" data-a="close" title="Fermer">×</button><h1>${esc(title(p))}</h1>${p.la?`<div class="la">${esc(p.la)}</div>`:''}<div class="en">${esc(p.en)}</div>
-   <div class="chips"><span class="chip">${esc(p.sys.label)}</span>${p.side?`<span class="chip">Côté <b>${sideFr(p)}</b></span>`:''}${type?`<span class="chip">${esc(type)}</span>`:''}${FUNC[p.mat]?`<span class="chip">Groupe <b>${esc(FUNC[p.mat])}</b></span>`:''}</div>`;
+  $('#cardHead').innerHTML=`<button class="x" data-a="close" title="Fermer (Échap)">×</button><button class="star ${FAV[key]?'on':''}" data-a="fav" title="Favori : à réviser (S)">★</button><h1>${esc(title(p))}</h1>${p.la?`<div class="la">${esc(p.la)}</div>`:''}<div class="en">${esc(p.en)}</div>
+   <div class="chips">${p.sys.internal?'':`<button class="chip" data-chip="sys" title="Afficher uniquement ce système">${esc(p.sys.label)}</button>`}${p.side?`<button class="chip" data-chip="side" title="Afficher uniquement ce côté du corps">Côté <b>${p.side==='r'?'droit':'gauche'}</b></button>`:''}${type?`<button class="chip" data-chip="type" title="Afficher uniquement les structures de ce type">${esc(type)}</button>`:''}${FUNC[p.mat]?`<button class="chip" data-chip="type" title="Afficher uniquement ce groupe musculaire">Groupe <b>${esc(FUNC[p.mat])}</b></button>`:''}</div>`;
   const anyGhost=parts.some(q=>q.ghost&&q!==p);
   let h=`<div class="acts"><button data-a="iso">Isoler<kbd>I</kbd></button><button data-a="hide">Masquer<kbd>H</kbd></button>
-    <button data-a="ghost" class="${anyGhost?'on':''}">Estomper le reste<kbd>G</kbd></button><button data-a="focus">Centrer<kbd>F</kbd></button>
+    <button data-a="ghost" class="${anyGhost?'on':''}" title="Rendre les autres structures transparentes">Estomper<kbd>G</kbd></button><button data-a="focus">Centrer<kbd>F</kbd></button>
     ${lm?`<button class="wide ${LM.bone===p?'on':''}" data-a="lm">Reliefs osseux · ${lm.length}<kbd>R</kbd></button>`:''}
     ${bone&&!p.ins?`<button class="wide ${INS.owner===p?'on':''}" data-a="ins">Insertions musculaires sur cet os</button>`:''}
-    ${p.sys.id==='muscles'&&FUNC[p.mat]?`<button class="wide ${INS.owner===p?'on':''}" data-a="ins">Origines et terminaisons</button>`:''}</div>`;
+    ${p.sys.id==='muscles'&&FUNC[p.mat]?`<button class="wide ${INS.owner===p?'on':''}" data-a="ins">Origines et terminaisons</button>`:''}
+    ${p.ins?'':`<button data-a="prev" title="Structure précédente de la liste">‹ Précédente<kbd>←</kbd></button><button data-a="next" title="Structure suivante de la liste">Suivante ›<kbd>→</kbd></button>`}</div><div id="desc"></div>`;
   if(LM.bone===p){h+=`<h3>Reliefs</h3>`+LM.list.map(L=>`<button class="lm ${L.i===LM.sel?'sel':''}" data-lm="${L.i}" style="--c:${L.css}"><i>${L.i+1}</i><span>${esc(L.fr||L.en)}${L.la?`<small>${esc(L.la)}</small>`:''}</span></button>`).join('')
     +`<div class="note">La pastille est placée au point exact du modèle Z-Anatomy. Le halo coloré autour indique seulement la zone voisine : son étendue est indicative.</div>`}
   else if(bone&&!lm&&!p.ins)h+=`<div class="note">Les reliefs ne sont pas détaillés pour cet os dans le modèle. Os détaillés : fémur, tibia, fibula, os coxal, humérus, radius, ulna, scapula, sacrum, sphénoïde, occipital, frontal, atlas, axis, vertèbres types (C4, T8, L3), 6ᵉ côte, sternum.</div>`;
@@ -439,19 +440,81 @@ function card(){
   h+=`<h3>Mes notes</h3><textarea id="notes" placeholder="Innervation, vascularisation, moyen mnémotechnique…">${esc(notes[key]||'')}</textarea>`;
   $('#cardBody').innerHTML=h;
   $('#notes').oninput=e=>{if(e.target.value.trim())notes[key]=e.target.value;else delete notes[key];LS.set('notes',notes)};
-  sheetOffset()}
+  showDesc();sheetOffset()}
+// ---- favoris, filtres rapides, navigation
+const FAV=LS.get('fav',{});const pkey=p=>p.sys.id+'|'+p.base;
+function toggleFav(){const p=S.sel;if(!p||p.ins)return;const k=pkey(p);if(FAV[k])delete FAV[k];else FAV[k]=title(p);LS.set('fav',FAV);toast(FAV[k]?'Ajouté aux favoris':'Retiré des favoris');card();buildTree()}
+function showOnly(pred,label,sys,forceDef){
+  if(Q.on)return;pushUndo();if(INS.owner)closeIns(true);if(sys)SYS.forEach(s=>{if(!s.internal)s.on=s===sys});
+  for(const q of parts){q.ghost=false;q.hidden=!!q.ins||(!forceDef&&defHidden(q))||!pred(q)}
+  if(S.sel){S.sel.hidden=false}
+  applyAll();SYS.forEach(sysRow);buildTree();if(LM.bone&&(LM.bone.hidden||!LM.bone.sys.on))closeLm();fitAll();card();toast(label+' — « Tout afficher » (A) pour revenir')}
+function chipClick(kind){const p=S.sel;if(!p)return;
+  if(kind==='sys')showOnly(q=>q.sys===p.sys,'Système : '+p.sys.label,p.sys);
+  else if(kind==='side'){const opp=p.side==='r'?'l':'r';showOnly(q=>q.side!==opp,'Côté '+(p.side==='r'?'droit':'gauche')+' (et structures médianes)')}
+  else{const lab=FUNC[p.mat]?'Groupe '+FUNC[p.mat].toLowerCase():(TYPE[p.mat]||p.mat);showOnly(q=>q.mat===p.mat,'Type : '+lab,null,true)}}
+function step(d){
+  if(LM.bone&&LM.sel>=0){selectLm((LM.sel+d+LM.list.length)%LM.list.length,true);return}
+  const p=S.sel;if(!p||p.ins)return;const arr=p.sys.parts.filter(q=>!q.hidden&&!q.ins),i=arr.indexOf(p);if(i<0||arr.length<2)return;select(arr[(i+d+arr.length)%arr.length],true)}
+// ---- descriptions (Wikipédia / Wikidata, retrouvées par identifiant TA2)
+const DESC=LS.get('desc',{});let descTok=0;
+const WD='https://www.wikidata.org/w/api.php?format=json&origin=*&',WP=l=>'https://'+l+'.wikipedia.org/w/api.php?format=json&origin=*&';
+const jget=async u=>{const r=await fetch(u);if(!r.ok)throw new Error('net');return r.json()};
+const ANAT=['P7173','P1323','P1402','P1554','P696','P3490','P3189'];
+const FACTS=[['P3490','Origine'],['P3491','Terminaison'],['P3189','Innervation'],['P2286','Vascularisation artérielle'],['P2289','Drainage veineux'],['P2288','Drainage lymphatique'],
+ ['P3190','Innerve'],['P3261','Branche de'],['P3262','Branches'],['P361','Partie de'],['P527','Comprend']];
+async function wpPage(lang,t){const j=await jget(WP(lang)+'action=query&redirects=1&prop=extracts|pageprops&exintro=1&explaintext=1&ppprop=disambiguation|wikibase_item&titles='+encodeURIComponent(t));
+  const pg=j.query&&Object.values(j.query.pages||{})[0];if(!pg||pg.missing!==undefined||pg.invalid!==undefined||(pg.pageprops&&pg.pageprops.disambiguation!==undefined))return null;
+  return{title:pg.title,text:(pg.extract||'').trim(),q:pg.pageprops&&pg.pageprops.wikibase_item}}
+async function wdEntity(q){const j=await jget(WD+'action=wbgetentities&ids='+q+'&props=claims|sitelinks|descriptions&sitefilter=frwiki|enwiki&languages=fr|en');return j.entities&&j.entities[q]}
+async function fetchDesc(t){
+  let ent=null,page=null,lang='fr';
+  if(t.id){const j=await jget(WD+'action=query&list=search&srlimit=1&srsearch='+encodeURIComponent('haswbstatement:P7173='+t.id));const q=j.query&&j.query.search[0]&&j.query.search[0].title;if(q)ent=await wdEntity(q)}
+  if(!ent)for(const [l,ti] of [['fr',t.fr],['en',t.en]]){if(!ti)continue;const pg=await wpPage(l,ti);if(!pg||!pg.q)continue;const e=await wdEntity(pg.q);
+    if(e&&e.claims&&ANAT.some(a=>e.claims[a])){ent=e;if(pg.text){page=pg;lang=l}break}}
+  if(!ent)return{none:1};
+  if(!page)for(const l of['fr','en']){const sl=ent.sitelinks&&ent.sitelinks[l+'wiki'];if(!sl)continue;const pg=await wpPage(l,sl.title);if(pg&&pg.text){page=pg;lang=l;break}}
+  const facts=[],ids=new Set();
+  for(const [P,lab] of FACTS){const v=(ent.claims[P]||[]).map(c=>c.mainsnak&&c.mainsnak.datavalue&&c.mainsnak.datavalue.value&&c.mainsnak.datavalue.value.id).filter(Boolean).slice(0,10);if(v.length){facts.push([lab,v]);v.forEach(i=>ids.add(i))}}
+  let L={};if(ids.size){const j=await jget(WD+'action=wbgetentities&props=labels&languages=fr|en&ids='+[...ids].slice(0,50).join('|'));L=j.entities||{}}
+  const lab=i=>{const e=L[i]&&L[i].labels;return e?(e.fr||e.en||{}).value:''};
+  const f=facts.map(([a,v])=>[a,v.map(lab).filter(Boolean)]).filter(x=>x[1].length);
+  let text=page?page.text:'';if(text.length>1500){const c=text.slice(0,1500),k=c.lastIndexOf('. ');text=k>600?c.slice(0,k+1):c+'…'}
+  if(!text){const d=ent.descriptions&&(ent.descriptions.fr||ent.descriptions.en);if(d)text=d.value.charAt(0).toUpperCase()+d.value.slice(1)+'.'}
+  if(!text&&!f.length)return{none:1};
+  return{t:text,l:page?lang:'fr',u:page?page.title:'',f}}
+function descTarget(noLm){const p=S.sel;if(!p)return null;
+  if(!noLm&&LM.bone===p&&LM.sel>=0){const L=LM.list[LM.sel];return{key:'lm|'+L.en,id:L.id,fr:L.fr,en:L.en,name:L.fr||L.en,lm:true}}
+  const nm=CAT.names[p.name]||[];return{key:p.ins?p.ins.muscle:p.base,id:nm[2],fr:p.fr,en:p.ins?p.ins.muscle:p.base,name:p.fr||p.en}}
+function paintDesc(t,d){const el=$('#desc');if(!el)return;const head=`<h3>${t.lm?'Relief : '+esc(t.name):'Description'}</h3>`;
+  if(!d){el.innerHTML=head+'<div class="note">Description indisponible pour le moment : elle se charge depuis Internet. Elle reste ensuite enregistrée.</div>';return}
+  if(d.none){el.innerHTML=t.lm?'':head+`<div class="note">Pas de fiche descriptive pour cette structure. <a target="_blank" rel="noopener" href="https://fr.wikipedia.org/w/index.php?search=${encodeURIComponent(t.name)}">Chercher sur Wikipédia</a></div>`;return}
+  const long=d.t.length>340;
+  el.innerHTML=head+(d.t?`<div class="desc ${long?'':'open'}"><p>${esc(d.t).replace(/\n+/g,'<br>')}</p>${long?'<button class="more ghost" data-a="more">Lire la suite</button>':''}</div>`:'')
+   +(d.f&&d.f.length?`<dl class="facts">${d.f.map(([a,v])=>`<dt>${esc(a)}</dt><dd>${v.map(esc).join(', ')}</dd>`).join('')}</dl>`:'')
+   +`<div class="src">Source : ${d.u?`<a target="_blank" rel="noopener" href="https://${d.l}.wikipedia.org/wiki/${encodeURIComponent(d.u.replace(/ /g,'_'))}">Wikipédia${d.l==='en'?' (en anglais)':''}</a> · `:''}Wikidata — CC BY-SA</div>`}
+async function showDesc(noLm){
+  const t=descTarget(noLm),el=$('#desc');if(!t||!el)return;const tok=++descTok,thin=d=>t.lm&&(!d||d.none||!d.t);
+  if(DESC[t.key]){if(thin(DESC[t.key]))return showDesc(true);paintDesc(t,DESC[t.key]);return}
+  el.innerHTML=`<h3>${t.lm?'Relief : '+esc(t.name):'Description'}</h3><div class="note">Chargement…</div>`;
+  let d=null;try{d=await fetchDesc(t)}catch{}
+  if(d){DESC[t.key]=d;const ks=Object.keys(DESC);if(ks.length>450)ks.slice(0,120).forEach(k=>delete DESC[k]);LS.set('desc',DESC)}
+  if(tok!==descTok)return;if(thin(d))return showDesc(true);paintDesc(t,d)}
 $('#card').addEventListener('click',e=>{
   const b=e.target.closest('button');if(!b)return;const p=S.sel;if(!p)return;
   if(b.dataset.lm!==undefined){selectLm(+b.dataset.lm,true);return}
   if(b.dataset.ins!==undefined){const q=parts[+b.dataset.ins];pbox(q);flyTo(q.center,Math.max(q.radius*2.2,.04));return}
+  if(b.dataset.chip){chipClick(b.dataset.chip);return}
   const a=b.dataset.a;
-  if(a==='close')select(null);else if(a==='iso')isolate(p);else if(a==='hide')hideSel();else if(a==='ghost')ghostOthers();else if(a==='focus')focusSel();
+  if(a==='fav')toggleFav();else if(a==='prev')step(-1);else if(a==='next')step(1);else if(a==='more')b.parentNode.classList.add('open');
+  else if(a==='close')select(null);else if(a==='iso')isolate(p);else if(a==='hide')hideSel();else if(a==='ghost')ghostOthers();else if(a==='focus')focusSel();
   else if(a==='lm')toggleLm();else if(a==='ins'){if(INS.owner===p)closeIns();else openIns(p)}});
 $('#card').addEventListener('mouseover',e=>{const b=e.target.closest('[data-lm]');setLmHover(b?+b.dataset.lm:-1)});
 function toggleLm(){const p=S.sel;if(!p||!CAT.landmarks[p.name])return;if(LM.bone===p)closeLm();else{openLm(p);focusSel()}card()}
 
 // ------------------------------------------------------------------ liste et recherche
-const openGrp=new Set(['squelette']);let IDX=[];
+const openGrp=new Set(['squelette']);let IDX=[],IDXC=[];
+function indexCatalog(){IDXC=[];for(const n in CAT.names){const v=CAT.names[n],s=SYSID[v[3]];if(!s||s.internal)continue;const [b,sd]=splitName(n);IDXC.push({t:norm((v[0]||'')+' '+(v[1]||'')+' '+b),name:n,s,fr:v[0]||b,side:sd})}}
 function sysRow(s){
   if(s.internal)return;let b=$('#sys-'+s.id);
   if(!b){b=document.createElement('button');b.id='sys-'+s.id;b.className='sys';b.style.setProperty('--c','#'+new THREE.Color(s.color).getHexString());
@@ -464,23 +527,31 @@ function indexSys(s){
   if(s.id==='squelette')for(const p of s.parts){const l=CAT.landmarks[p.name];if(!l||p.side==='l')continue;l.forEach((L,i)=>IDX.push({t:norm(L.fr+' '+L.la+' '+L.en),p,lm:i,L}))}
   s.parts.sort((a,b)=>title(a).localeCompare(title(b),'fr')||a.side.localeCompare(b.side))}
 function buildTree(){
-  const t=$('#tree');let h='';
+  const t=$('#tree');let h='';const fk=Object.keys(FAV);
+  if(fk.length){const op=openGrp.has('fav');let rows='';
+    if(op){const m=new Map();for(const p of parts)if(!p.ins&&FAV[pkey(p)]){const k=pkey(p);if(!m.has(k))m.set(k,[]);m.get(k).push(p)}
+      for(const k of fk){const a=m.get(k);rows+=a?a.map(itemRow).join(''):`<button class="it" data-fav="${esc(k)}"><span>${esc(FAV[k]===1?k.split('|')[1]:FAV[k])}</span><small>à charger</small></button>`}}
+    h+=`<div class="grp ${op?'open':''}" data-g="fav"><button>★ Favoris<em>${fk.length}</em></button><div class="items">${rows}</div></div>`}
   for(const s of SYS){if(s.internal||!s.on)continue;const op=openGrp.has(s.id);
     h+=`<div class="grp ${op?'open':''}" data-g="${s.id}"><button>${esc(s.label)}<em>${s.parts.length}</em></button><div class="items">${op?items(s):''}</div></div>`}
   t.innerHTML=h||'<div class="note">Active un système ci-dessus.</div>';markTree()}
-const items=s=>s.parts.map(p=>`<button class="it ${p.hidden?'hid':''}" data-id="${p.id}"><span>${esc(title(p))}</span>${CAT.landmarks[p.name]?`<span class="badge">${CAT.landmarks[p.name].length}</span>`:''}${p.side?`<small>${p.side==='r'?'D':'G'}</small>`:''}</button>`).join('');
+const itemRow=p=>`<button class="it ${p.hidden?'hid':''}" data-id="${p.id}"><span>${esc(title(p))}</span>${CAT.landmarks[p.name]?`<span class="badge">${CAT.landmarks[p.name].length}</span>`:''}${p.side?`<small>${p.side==='r'?'D':'G'}</small>`:''}</button>`;
+const items=s=>s.parts.map(itemRow).join('');
 function markTree(){$$('#tree .it.sel').forEach(b=>b.classList.remove('sel'));if(S.sel){const b=$(`#tree .it[data-id="${S.sel.id}"]`);if(b){b.classList.add('sel');b.scrollIntoView({block:'nearest'})}}}
 $('#tree').addEventListener('click',e=>{
   const g=e.target.closest('.grp>button');if(g){const id=g.parentNode.dataset.g;if(openGrp.has(id))openGrp.delete(id);else openGrp.add(id);buildTree();return}
-  const b=e.target.closest('.it');if(b&&!Q.on){const p=parts[+b.dataset.id];if(p.hidden){pushUndo();p.hidden=false;apply(p);b.classList.remove('hid')}select(p,true)}});
-$('#tree').addEventListener('mouseover',e=>{const b=e.target.closest('.it');setHover(b?parts[+b.dataset.id]:null)});
+  const b=e.target.closest('.it');if(!b||Q.on)return;
+  if(b.dataset.fav){const k=b.dataset.fav,sy=SYSID[k.split('|')[0]];if(sy)setSys(sy,true).then(()=>{const p=parts.find(x=>!x.ins&&pkey(x)===k);if(p){if(p.hidden){p.hidden=false;apply(p)}select(p,true)}});return}
+  const p=parts[+b.dataset.id];if(!p.sys.on){p.sys.on=true;p.sys.parts.forEach(apply);sysRow(p.sys);buildTree()}if(p.hidden){pushUndo();p.hidden=false;apply(p);b.classList.remove('hid')}select(p,true)});
+$('#tree').addEventListener('mouseover',e=>{const b=e.target.closest('.it[data-id]');setHover(b?parts[+b.dataset.id]:null)});
 let resCur=0,resList=[];
 function doSearch(){
   const q=norm($('#search').value),box=$('#results');if(q.length<2){box.classList.remove('on');return}
-  const ws=q.split(' ');resList=IDX.filter(e=>ws.every(w=>e.t.includes(w))).sort((a,b)=>(a.t.startsWith(q)?0:1)-(b.t.startsWith(q)?0:1)||(a.lm!==undefined?1:0)-(b.lm!==undefined?1:0)||a.t.length-b.t.length).slice(0,40);
-  resCur=0;box.innerHTML=resList.map((e,i)=>`<button class="res ${i?'':'cur'}" data-i="${i}"><span>${esc(e.lm!==undefined?(e.L.fr||e.L.en):title(e.p))}</span><small>${e.lm!==undefined?'relief · '+esc(e.p.fr||e.p.en):esc(e.p.sys.label)+(e.p.side?' · '+(e.p.side==='r'?'D':'G'):'')}</small></button>`).join('')
-    ||'<div class="note">Aucun résultat dans les systèmes chargés. Active d\'autres systèmes pour élargir la recherche.</div>';box.classList.add('on')}
+  const ws=q.split(' ');resList=IDX.concat(IDXC.filter(e=>e.s.state!=='ready')).filter(e=>ws.every(w=>e.t.includes(w))).sort((a,b)=>(a.t.startsWith(q)?0:1)-(b.t.startsWith(q)?0:1)||(a.lm!==undefined?1:0)-(b.lm!==undefined?1:0)||a.t.length-b.t.length).slice(0,40);
+  resCur=0;box.innerHTML=resList.map((e,i)=>`<button class="res ${i?'':'cur'}" data-i="${i}"><span>${esc(e.name?e.fr:e.lm!==undefined?(e.L.fr||e.L.en):title(e.p))}</span><small>${e.name?esc(e.s.label)+(e.side?' · '+(e.side==='r'?'D':'G'):''):e.lm!==undefined?'relief · '+esc(e.p.fr||e.p.en):esc(e.p.sys.label)+(e.p.side?' · '+(e.p.side==='r'?'D':'G'):'')}</small></button>`).join('')
+    ||'<div class="note">Aucun résultat.</div>';box.classList.add('on')}
 function goResult(i){const e=resList[i];if(!e)return;$('#results').classList.remove('on');$('#search').blur();if(Q.on)return;
+  if(e.name){setSys(e.s,true).then(()=>{const p=parts.find(x=>x.name===e.name);if(!p){toast('Cette structure n\'a pas de modèle 3D');return}if(p.hidden){p.hidden=false;apply(p)}select(p,true)});return}
   const p=e.p;if(!p.sys.on){p.sys.on=true;p.sys.parts.forEach(apply);sysRow(p.sys);buildTree()}
   if(p.hidden){pushUndo();p.hidden=false;apply(p)}
   select(p);if(e.lm!==undefined){if(LM.bone!==p)openLm(p);card();selectLm(e.lm,true)}else focusSel()}
@@ -508,15 +579,20 @@ $('#shot').onclick=()=>{const light=document.documentElement.dataset.theme==='li
   canvas.toBlob(b=>{const a=document.createElement('a');a.href=URL.createObjectURL(b);a.download='atlas-'+(S.sel?norm(title(S.sel)).replace(/ /g,'-'):'vue')+'.png';a.click();setTimeout(()=>URL.revokeObjectURL(a.href),2000)});scene.background=null;invalidate()};
 function setTheme(t){document.documentElement.dataset.theme=t;LS.set('theme',t);invalidate()}
 $('#theme').onclick=()=>setTheme(document.documentElement.dataset.theme==='light'?'dark':'light');setTheme(LS.get('theme','dark'));
-$('#closeLeft').onclick=()=>{$('#left').classList.add('closed');invalidate()};$('#menuBtn').onclick=()=>{$('#left').classList.remove('closed');invalidate()};
+function leftOpen(o){$('#left').classList.toggle('closed',!o);document.body.classList.toggle('noleft',!o);invalidate()}
+$('#closeLeft').onclick=()=>leftOpen(false);$('#menuBtn').onclick=()=>leftOpen(true);
+function toggleHelp(f){const h=$('#help');h.classList.toggle('on',f===undefined?!h.classList.contains('on'):f);$('#helpBtn').classList.toggle('on',h.classList.contains('on'))}
+$('#helpBtn').onclick=()=>toggleHelp();$('#helpClose').onclick=()=>toggleHelp(false);
 $$('.tabs button').forEach(b=>b.onclick=()=>{$$('.tabs button').forEach(x=>x.classList.toggle('on',x===b));$$('.pane').forEach(p=>p.classList.toggle('on',p.id==='pane-'+b.dataset.tab));if(b.dataset.tab==='quiz')quizPane()});
 addEventListener('keydown',e=>{
   if((e.target.matches&&e.target.matches('input,textarea,select'))||e.metaKey||e.ctrlKey&&e.key!=='z')return;const k=e.key.toLowerCase();
   if(Q.on){quizKey(e,k);return}
-  if(k==='/'){e.preventDefault();$('#left').classList.remove('closed');$('#search').focus()}
-  else if(k==='escape'){if(clip.on)setClip(false);else if(LM.sel>=0)selectLm(-1);else select(null)}
+  if(k==='/'){e.preventDefault();leftOpen(true);$('#search').focus()}
+  else if(k==='?'){toggleHelp()}
+  else if(k==='escape'){if($('#help').classList.contains('on'))toggleHelp(false);else if($('#settings').classList.contains('on'))$('#setClose').click();else if(clip.on)setClip(false);else if(LM.sel>=0)selectLm(-1);else select(null)}
   else if(k==='z')undo();else if(k==='a')showAll();else if(k==='l')$('#labBtn').click();
-  else if(S.sel){if(k==='i')isolate(S.sel);else if(k==='h')hideSel();else if(k==='g')ghostOthers();else if(k==='f')focusSel();else if(k==='r')toggleLm()}});
+  else if(k==='arrowleft'||k==='arrowright'){if(S.sel){e.preventDefault();step(k==='arrowleft'?-1:1)}}
+  else if(S.sel){if(k==='i')isolate(S.sel);else if(k==='h')hideSel();else if(k==='g')ghostOthers();else if(k==='f')focusSel();else if(k==='r')toggleLm();else if(k==='s')toggleFav()}});
 
 // ------------------------------------------------------------------ panneau de réglages
 const ROWS=[['h','Affichage'],['tog','shadows','Ombres portées'],['rng','shadowStrength','Intensité des ombres',.2,.95,.05],['tog','ground','Ombre au sol'],
@@ -560,34 +636,36 @@ function quizPane(){
   $('#pane-quiz').innerHTML=`<h3>Mode</h3>${MODES.map(m=>`<button class="mode ${Q.mode===m[0]?'on':''}" data-m="${m[0]}"><b>${m[1]}</b><span>${m[2]}</span></button>`).join('')}
    <h3>Réglages</h3>
    ${lmMode?`<div class="field"><label>Os</label><select id="qBone"><option value="all">Tous les os détaillés</option>${lmBones().map(p=>`<option value="${p.id}" ${Q.bone==p.id?'selected':''}>${esc(title(p))} (${CAT.landmarks[p.name].length})</option>`).join('')}</select></div>`
-    :`<div class="field"><label>Système</label><select id="qSys">${SYS.filter(s=>!s.internal).map(s=>`<option value="${s.id}" ${Q.sys===s.id?'selected':''}>${esc(s.label)}</option>`).join('')}</select></div>
+    :`<div class="field"><label>Système</label><select id="qSys">${SYS.filter(s=>!s.internal).map(s=>`<option value="${s.id}" ${Q.sys===s.id?'selected':''}>${esc(s.label)}</option>`).join('')}<option value="fav" ${Q.sys==='fav'?'selected':''}>★ Mes favoris (${Object.keys(FAV).length})</option></select></div>
       ${Q.sys==='squelette'?`<div class="field"><label>Région</label><select id="qGrp">${GROUPS.map(g=>`<option value="${g[0]}" ${Q.grp===g[0]?'selected':''}>${g[1]}</option>`).join('')}</select></div>`:''}`}
    <div class="field"><label>Questions</label><div class="seg" id="qN">${[10,20,40].map(n=>`<button data-n="${n}" class="${Q.n===n?'on':''}">${n}</button>`).join('')}</div></div>
    <button class="big on" id="qGo">${Q.on?'Recommencer avec ces réglages':'Commencer'}</button>
    <div class="note">Répétition espacée : les structures ratées reviennent en priorité, les acquises s'espacent (1, 3, 7 puis 21 jours).${due?` <b>${due}</b> à revoir maintenant.`:''}<br>
-   Total : ${stats.n} réponses${stats.n?' · '+Math.round(stats.ok/stats.n*100)+' % justes':''}.</div>`;
+   Total : ${stats.n} réponses${stats.n?' · '+Math.round(stats.ok/stats.n*100)+' % justes':''} · ${Object.values(srs).filter(v=>v[0]>=2).length} éléments acquis.</div>`;
   $$('#pane-quiz .mode').forEach(b=>b.onclick=()=>{Q.mode=b.dataset.m;quizPane()});
   $$('#qN button').forEach(b=>b.onclick=()=>{Q.n=+b.dataset.n;quizPane()});
   if($('#qSys'))$('#qSys').onchange=e=>{Q.sys=e.target.value;quizPane()};if($('#qGrp'))$('#qGrp').onchange=e=>Q.grp=e.target.value;if($('#qBone'))$('#qBone').onchange=e=>Q.bone=e.target.value;
   $('#qGo').onclick=()=>quizStart()}
 function order(pool){const now=Date.now();return shuffle(pool.slice()).map(it=>{const v=srs[it.key];return{it,pr:!v?1:v[1]<=now?0:2}}).sort((a,b)=>a.pr-b.pr).map(x=>x.it)}
 async function quizStart(only){
-  const lmMode=Q.mode[0]==='l',s=lmMode?SYSID.squelette:SYSID[Q.sys];
+  const lmMode=Q.mode[0]==='l',fav=!lmMode&&Q.sys==='fav';
+  if(fav&&Object.keys(FAV).length<4){toast('Ajoute au moins 4 favoris (★ sur une fiche) pour ce quiz');return}
+  const sset=lmMode?[SYSID.squelette]:fav?[...new Set(Object.keys(FAV).map(k=>k.split('|')[0]))].map(i=>SYSID[i]).filter(Boolean):[SYSID[Q.sys]],s=sset[0],grpF=!lmMode&&!fav&&Q.sys==='squelette'&&Q.grp!=='all';
   const go=$('#qGo');if(go){go.disabled=true;go.textContent='Chargement…'}
-  try{await loadSys(s)}catch{quizPane();return}
+  try{for(const x of sset)await loadSys(x)}catch{quizPane();return}
   let pool=[];
   if(lmMode){const bones=Q.bone==='all'?lmBones():[parts[+Q.bone]];
     for(const b of bones)CAT.landmarks[b.name].forEach((L,i)=>pool.push({key:'lm|'+b.base+'|'+L.en,bone:b,idx:i,fr:L.fr||L.en,la:L.la}))}
-  else{const m=new Map();for(const p of s.parts){if(s.id==='squelette'&&Q.grp!=='all'&&boneGroup(p.en)!==Q.grp)continue;if(defHidden(p))continue;const k=s.id+'|'+p.base;let e=m.get(k);if(!e)m.set(k,e={key:k,parts:[],fr:title(p),la:p.la});e.parts.push(p)}pool=[...m.values()]}
+  else{const m=new Map();for(const s of sset)for(const p of s.parts){if(grpF&&boneGroup(p.en)!==Q.grp)continue;if(defHidden(p)||p.ins)continue;const k=s.id+'|'+p.base;if(fav&&!FAV[k])continue;let e=m.get(k);if(!e)m.set(k,e={key:k,parts:[],fr:title(p),la:p.la});e.parts.push(p)}pool=[...m.values()]}
   if(pool.length<4){toast('Pas assez de structures pour ce quiz');quizPane();return}
   Q.pool=pool;Q.items=only?shuffle(only.slice()):order(pool).slice(0,Q.n);
   if(!Q.on){Q.snap=snap();Q.cam=[camera.position.clone(),controls.target.clone()]}
   closeLm();if(INS.owner)closeIns(true);if(clip.on)setClip(false);
   Q.on=true;select(null);Q.on=true;hideTip();
-  SYS.forEach(x=>{x.on=x===s});for(const p of parts){p.ghost=false;p.flash=0;p.hidden=p.sys!==s||defHidden(p)||(!lmMode&&s.id==='squelette'&&Q.grp!=='all'&&boneGroup(p.en)!==Q.grp)}
+  SYS.forEach(x=>{x.on=sset.includes(x)});for(const p of parts){p.ghost=false;p.flash=0;p.hidden=!sset.includes(p.sys)||defHidden(p)||(grpF&&boneGroup(p.en)!==Q.grp)}
   applyAll();SYS.forEach(sysRow);
   Q.i=0;Q.ok=0;Q.streak=0;Q.errs=[];Q.done=false;Q.t0=Date.now();Q.lastBone=null;
-  $('#qz').classList.add('on');$('#card').classList.remove('on');if(innerWidth<900)$('#left').classList.add('closed');
+  $('#qz').classList.add('on');$('#card').classList.remove('on');if(innerWidth<900)leftOpen(false);
   if(!lmMode)fitAll(new THREE.Vector3(0,0,1),500);
   if($('#pane-quiz').classList.contains('on'))quizPane();
   quizAsk()}
@@ -650,10 +728,10 @@ function quizKey(e,k){
 SYS.forEach(sysRow);
 $$('#optList button').forEach(b=>{const k=b.dataset.opt;b.classList.toggle('on',!!OPT[k]);b.onclick=()=>{if(Q.on)return;OPT[k]=!OPT[k];LS.set('opt',OPT);b.classList.toggle('on',OPT[k]);
   for(const p of parts)if(p.mat===k){p.hidden=!OPT[k];apply(p)}buildTree()}});
-if(innerWidth<900)$('#left').classList.add('closed');
+if(innerWidth<900)leftOpen(false);
 (async()=>{
   try{CAT=await (await fetch('data/catalog.json')).json()}catch(e){$('#splashMsg').className='err';$('#splashMsg').textContent="Données introuvables (data/catalog.json). Lance l'appli avec « Lancer l'atlas.command ».";return}
-  requestAnimationFrame(loop);
+  indexCatalog();requestAnimationFrame(loop);
   try{await setSys(SYSID.squelette,true)}catch{}
   if(SYSID.squelette.state!=='ready'){$('#splashMsg').className='err';$('#splashMsg').textContent="Modèle introuvable : le dossier « export » doit se trouver à côté du dossier « atlas ».";return}
   const b=visibleBox(),c=b.getCenter(new THREE.Vector3());controls.target.copy(c);camera.position.set(c.x,c.y,c.z+b.getSize(new THREE.Vector3()).length()/2/Math.sin(THREE.MathUtils.degToRad(15))*1.18/Math.min(1,camera.aspect*.8));
