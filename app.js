@@ -34,6 +34,7 @@ const SYS=[
 ];
 SYS.forEach(s=>{s.on=false;s.state='';s.parts=[];s.promise=null});
 const SYSID=Object.fromEntries(SYS.map(s=>[s.id,s]));
+const SHORT={articulations:'Articulations',vaisseaux:'Vaisseaux',nerfs:'Nerfs',feminin:'Génital féminin',regions:'Peau et régions'};
 const TYPE={Bone:'Os',Cartilage:'Cartilage',Teeth:'Dent','Teeth-roots':'Racine dentaire',Suture:'Suture',Tendon:'Tendon',Fascia:'Fascia',Ligament:'Ligament',
  'Articular capsule':'Capsule articulaire',Bursa:'Bourse synoviale',Fat:'Corps adipeux',Artery:'Artère',Vein:'Veine','Pulmonary artery':'Artère pulmonaire',
  'Pulmonary vein':'Veine pulmonaire',Gland:'Glande',Mucosa:'Muqueuse',Nerve:'Nerf',Nucleus:'Noyau','White matter':'Substance blanche'};
@@ -100,6 +101,7 @@ function flyTo(center,radius,dir,ms=650){
 function loop(t){
   requestAnimationFrame(loop);
   if(tw){const k=Math.min(1,(t-tw.t0)/tw.ms),e=k<.5?4*k*k*k:1-Math.pow(-2*k+2,3)/2;camera.position.lerpVectors(tw.p0,tw.p1,e);controls.target.lerpVectors(tw.q0,tw.q1,e);if(k>=1)tw=null;dirty=true}
+  if(EX.k!==EX.t){const d=EX.t-EX.k;EX.k=Math.abs(d)<.004?EX.t:EX.k+d*.22;exApply();if(!EX.on&&EX.k===0)exRestore();dirty=true}
   controls.update();
   if(!dirty){lastT=t;return}
   if(moving){if(t-lastT>34)slow++;else slow=Math.max(0,slow-1);if(slow>6){if(renderer.shadowMap.autoUpdate&&CFG.shadows)renderer.shadowMap.autoUpdate=false;else if(curDpr>1){curDpr=1;renderer.setPixelRatio(1);renderer.setSize(innerWidth,innerHeight,false)}slow=0}}
@@ -275,7 +277,7 @@ canvas.addEventListener('pointerleave',()=>{setHover(null);setLmHover(-1);hideTi
 canvas.addEventListener('dblclick',e=>{const h=pick(e,false);if(h&&h.part&&!Q.on){select(h.part);focusSel()}});
 function setHover(p){if(S.hov===p)return;const o=S.hov;S.hov=p;if(o)apply(o);if(p)apply(p)}
 function onHover(e){
-  const h=pick(e);canvas.style.cursor=h?'pointer':'';
+  const h=pick(e);canvas.style.cursor=h?(DIS?'crosshair':'pointer'):'';
   if(h&&h.lm!==undefined){setHover(null);setLmHover(h.lm);if(!Q.on||Q.answered){const L=LM.list[h.lm];showTip(e,L.fr||L.en,L.la)}else hideTip();return}
   setLmHover(-1);
   if(Q.on&&(Q.mode==='lmname'||Q.mode==='lmfind')){setHover(null);hideTip();return}
@@ -285,6 +287,7 @@ function onClick(e){
   const h=pick(e);
   if(Q.on){quizClick(h);return}
   if(h&&h.lm!==undefined){selectLm(h.lm,true);return}
+  if(DIS&&h&&h.part){pushUndo();const p=h.part;p.hidden=true;apply(p);if(S.sel===p)select(null);setHover(null);hideTip();buildTree();return}
   select(h?h.part:null)}
 const tip=$('#tip');
 function showTip(e,a,b){tip.innerHTML=esc(a)+(b?'<small>'+esc(b)+'</small>':'');tip.style.display='block';const w=tip.offsetWidth;tip.style.left=Math.min(innerWidth-w-8,e.clientX+14)+'px';tip.style.top=(e.clientY+16)+'px'}
@@ -302,14 +305,14 @@ function select(p,fly){
   if(LM.bone&&LM.bone!==p)closeLm();
   if(INS.owner&&INS.owner!==p&&!(p&&p.ins))closeIns();
   S.sel=p;if(o)apply(o);if(p)apply(p);card();markTree();if(fly&&p)focusSel()}
-function focusSel(){const p=S.sel;if(!p)return;pbox(p);flyTo(p.center,Math.max(p.radius*1.25,.035))}
+function focusSel(){const p=S.sel;if(!p)return;pbox(p);flyTo(p.exOff?p.center.clone().add(p.exOff):p.center,Math.max(p.radius*1.25,.035))}
 function visibleBox(){const b=new THREE.Box3();for(const p of parts)if(p.sys.on&&!p.hidden&&!p.ghost)b.union(pbox(p));return b}
 function fitAll(dir,ms){const b=visibleBox();if(b.isEmpty())return;flyTo(b.getCenter(new THREE.Vector3()),b.getSize(new THREE.Vector3()).length()/2,dir,ms)}
 function isolate(p){pushUndo();for(const q of parts){q.ghost=false;q.hidden=q.ins?!(INS.owner===p&&INS.parts.includes(q)):q!==p}applyAll();buildTree();
   if(CAT.landmarks[p.name]&&LM.bone!==p)openLm(p);focusSel();card()}
 function hideSel(){const p=S.sel;if(!p)return;pushUndo();p.hidden=true;apply(p);select(null);markTree()}
 function ghostOthers(){const p=S.sel;if(!p)return;pushUndo();const any=parts.some(q=>q.ghost&&q!==p);for(const q of parts)if(q!==p&&!q.ins)q.ghost=!any;p.ghost=false;applyAll();card()}
-function showAll(){if(Q.on)return;pushUndo();if(INS.owner)closeIns(true);for(const p of parts){p.hidden=defHidden(p);p.ghost=false}applyAll();buildTree();card()}
+function showAll(){if(Q.on)return;pushUndo();exOff();if(INS.owner)closeIns(true);for(const p of parts){p.hidden=defHidden(p);p.ghost=false}applyAll();buildTree();card()}
 
 // ------------------------------------------------------------------ reliefs osseux
 const LM={bone:null,list:[],pins:[],sel:-1,hov:-1,quiz:false};
@@ -325,7 +328,7 @@ function pinTex(css,n){const c=document.createElement('canvas');c.width=c.height
   x.fillStyle='#10181b';x.font='700 '+(n>9?26:30)+'px -apple-system,Segoe UI,sans-serif';x.textAlign='center';x.textBaseline='middle';x.fillText(n,32,34);
   const t=new THREE.CanvasTexture(c);t.colorSpace=THREE.SRGBColorSpace;return t}
 function openLm(p,quiz=false){
-  closeLm();const data=CAT.landmarks[p.name];if(!data||!data.length)return;
+  closeLm();exOff();const data=CAT.landmarks[p.name];if(!data||!data.length)return;
   boneGeo(p);const W=p.W,N=p.N,n=W.length/3;pbox(p);
   LM.bone=p;LM.quiz=quiz;LM.sel=LM.hov=-1;
   const tri=new THREE.Triangle(),A=new THREE.Vector3(),B=new THREE.Vector3(),C=new THREE.Vector3(),cp=new THREE.Vector3(),q=new THREE.Vector3(),fn=new THREE.Vector3();
@@ -395,7 +398,7 @@ function layoutLabels(){
 // ------------------------------------------------------------------ insertions musculaires
 const INS={owner:null,parts:[]};
 async function openIns(p){
-  const s=SYSID.insertions;try{await loadSys(s)}catch{return}s.on=true;closeIns(true);
+  const s=SYSID.insertions;try{await loadSys(s)}catch{return}s.on=true;closeIns(true);exOff();
   let found=[];
   if(p.sys.id==='squelette'){
     boneGeo(p);if(!p.hashG){const c=.004,H=new Map(),W=p.W;for(let i=0;i<W.length;i+=3){const k=Math.floor(W[i]/c)+'_'+Math.floor(W[i+1]/c)+'_'+Math.floor(W[i+2]/c);let a=H.get(k);if(!a)H.set(k,a=[]);a.push(i)}p.hashG=H}
@@ -428,6 +431,7 @@ function card(){
     ${lm?`<button class="wide ${LM.bone===p?'on':''}" data-a="lm">Reliefs osseux · ${lm.length}<kbd>R</kbd></button>`:''}
     ${bone&&!p.ins?`<button class="wide ${INS.owner===p?'on':''}" data-a="ins">Insertions musculaires sur cet os</button>`:''}
     ${p.sys.id==='muscles'&&FUNC[p.mat]?`<button class="wide ${INS.owner===p?'on':''}" data-a="ins">Origines et terminaisons</button>`:''}
+    ${p.ins?'':`<button class="wide ${EX.on&&EX.scope==='sel'?'on':''}" data-a="explode" title="Écarter les structures voisines pour voir comment elles s'assemblent">Vue éclatée autour<kbd>E</kbd></button>`}
     ${p.ins?'':`<button data-a="prev" title="Structure précédente de la liste">‹ Précédente<kbd>←</kbd></button><button data-a="next" title="Structure suivante de la liste">Suivante ›<kbd>→</kbd></button>`}</div><div id="desc"></div>`;
   if(LM.bone===p){h+=`<h3>Reliefs</h3>`+LM.list.map(L=>`<button class="lm ${L.i===LM.sel?'sel':''}" data-lm="${L.i}" style="--c:${L.css}"><i>${L.i+1}</i><span>${esc(L.fr||L.en)}${L.la?`<small>${esc(L.la)}</small>`:''}</span></button>`).join('')
     +`<div class="note">La pastille est placée au point exact du modèle Z-Anatomy. Le halo coloré autour indique seulement la zone voisine : son étendue est indicative.</div>`}
@@ -506,7 +510,7 @@ $('#card').addEventListener('click',e=>{
   if(b.dataset.ins!==undefined){const q=parts[+b.dataset.ins];pbox(q);flyTo(q.center,Math.max(q.radius*2.2,.04));return}
   if(b.dataset.chip){chipClick(b.dataset.chip);return}
   const a=b.dataset.a;
-  if(a==='fav')toggleFav();else if(a==='prev')step(-1);else if(a==='next')step(1);else if(a==='more')b.parentNode.classList.add('open');
+  if(a==='explode'){if(EX.on)setExplode(false);else explodeAround()}else if(a==='fav')toggleFav();else if(a==='prev')step(-1);else if(a==='next')step(1);else if(a==='more')b.parentNode.classList.add('open');
   else if(a==='close')select(null);else if(a==='iso')isolate(p);else if(a==='hide')hideSel();else if(a==='ghost')ghostOthers();else if(a==='focus')focusSel();
   else if(a==='lm')toggleLm();else if(a==='ins'){if(INS.owner===p)closeIns();else openIns(p)}});
 $('#card').addEventListener('mouseover',e=>{const b=e.target.closest('[data-lm]');setLmHover(b?+b.dataset.lm:-1)});
@@ -518,7 +522,7 @@ function indexCatalog(){IDXC=[];for(const n in CAT.names){const v=CAT.names[n],s
 function sysRow(s){
   if(s.internal)return;let b=$('#sys-'+s.id);
   if(!b){b=document.createElement('button');b.id='sys-'+s.id;b.className='sys';b.style.setProperty('--c','#'+new THREE.Color(s.color).getHexString());
-    b.innerHTML='<i></i><span></span><em></em><div class="bar"></div>';b.querySelector('span').textContent=s.label;b.onclick=()=>{if(s.state!=='loading'&&!Q.on)setSys(s,!s.on)};$('#sysList').appendChild(b)}
+    b.innerHTML='<i></i><span></span><em></em><div class="bar"></div>';b.querySelector('span').textContent=SHORT[s.id]||s.label;b.title=s.label;b.onclick=()=>{if(s.state!=='loading'&&!Q.on)setSys(s,!s.on)};$('#sysList').appendChild(b)}
   b.classList.toggle('on',s.on);b.querySelector('em').textContent=s.state==='loading'?Math.round((s.prog||0)*100)+' %':s.state==='ready'?s.parts.length:'';
   b.querySelector('.bar').style.width=s.state==='loading'?(s.prog||0)*100+'%':'0'}
 function indexSys(s){
@@ -537,7 +541,7 @@ function buildTree(){
   t.innerHTML=h||'<div class="note">Active un système ci-dessus.</div>';markTree()}
 const itemRow=p=>`<button class="it ${p.hidden?'hid':''}" data-id="${p.id}"><span>${esc(title(p))}</span>${CAT.landmarks[p.name]?`<span class="badge">${CAT.landmarks[p.name].length}</span>`:''}${p.side?`<small>${p.side==='r'?'D':'G'}</small>`:''}</button>`;
 const items=s=>s.parts.map(itemRow).join('');
-function markTree(){$$('#tree .it.sel').forEach(b=>b.classList.remove('sel'));if(S.sel){const b=$(`#tree .it[data-id="${S.sel.id}"]`);if(b){b.classList.add('sel');b.scrollIntoView({block:'nearest'})}}}
+function markTree(){$$('#tree .it.sel').forEach(b=>b.classList.remove('sel'));if(S.sel){const b=$(`#tree .it[data-id="${S.sel.id}"]`);if(b){b.classList.add('sel');const t=$('#tree'),r=b.getBoundingClientRect(),tr=t.getBoundingClientRect();if(r.top<tr.top||r.bottom>tr.bottom)t.scrollTop+=r.top-tr.top-tr.height/2}}}
 $('#tree').addEventListener('click',e=>{
   const g=e.target.closest('.grp>button');if(g){const id=g.parentNode.dataset.g;if(openGrp.has(id))openGrp.delete(id);else openGrp.add(id);buildTree();return}
   const b=e.target.closest('.it');if(!b||Q.on)return;
@@ -575,7 +579,7 @@ function updClip(){const a=clip.axis,k=+$('#clipPos').value/1000,v=clip.box.min[
   clip.plane.normal.set(a==='x'?s:0,a==='y'?s:0,a==='z'?s:0);clip.plane.constant=-s*v;invalidate()}
 $('#clipBtn').onclick=()=>setClip(!clip.on);$('#clipOff').onclick=()=>setClip(false);$('#clipPos').oninput=updClip;$('#clipFlip').onclick=()=>{clip.flip=!clip.flip;updClip()};
 $$('#clipAxis button').forEach(b=>b.onclick=()=>{clip.axis=b.dataset.ax;$$('#clipAxis button').forEach(x=>x.classList.toggle('on',x===b));updClip()});
-$('#shot').onclick=()=>{const light=document.documentElement.dataset.theme==='light';scene.background=new THREE.Color(light?0xf3efe8:0x10191d);updatePins();renderer.render(scene,camera);
+function shot(){const light=document.documentElement.dataset.theme==='light';scene.background=new THREE.Color(light?0xf3efe8:0x10191d);updatePins();renderer.render(scene,camera);
   canvas.toBlob(b=>{const a=document.createElement('a');a.href=URL.createObjectURL(b);a.download='atlas-'+(S.sel?norm(title(S.sel)).replace(/ /g,'-'):'vue')+'.png';a.click();setTimeout(()=>URL.revokeObjectURL(a.href),2000)});scene.background=null;invalidate()};
 function setTheme(t){document.documentElement.dataset.theme=t;LS.set('theme',t);invalidate()}
 $('#theme').onclick=()=>setTheme(document.documentElement.dataset.theme==='light'?'dark':'light');setTheme(LS.get('theme','dark'));
@@ -589,11 +593,45 @@ addEventListener('keydown',e=>{
   if(Q.on){quizKey(e,k);return}
   if(k==='/'){e.preventDefault();leftOpen(true);$('#search').focus()}
   else if(k==='?'){toggleHelp()}
-  else if(k==='escape'){if($('#help').classList.contains('on'))toggleHelp(false);else if($('#settings').classList.contains('on'))$('#setClose').click();else if(clip.on)setClip(false);else if(LM.sel>=0)selectLm(-1);else select(null)}
+  else if(k==='escape'){if($('#help').classList.contains('on'))toggleHelp(false);else if($('#settings').classList.contains('on'))$('#setClose').click();else if(EX.on)setExplode(false);else if(DIS)setDis(false);else if(clip.on)setClip(false);else if(LM.sel>=0)selectLm(-1);else select(null)}
+  else if(k==='e'){if(EX.on)setExplode(false);else if(S.sel&&!S.sel.ins)explodeAround();else setExplode(true,'all')}else if(k==='d')setDis(!DIS)
   else if(k==='z')undo();else if(k==='a')showAll();else if(k==='l')$('#labBtn').click();
   else if(k==='arrowleft'||k==='arrowright'){if(S.sel){e.preventDefault();step(k==='arrowleft'?-1:1)}}
   else if(S.sel){if(k==='i')isolate(S.sel);else if(k==='h')hideSel();else if(k==='g')ghostOthers();else if(k==='f')focusSel();else if(k==='r')toggleLm();else if(k==='s')toggleFav()}});
 
+// ------------------------------------------------------------------ vue éclatée et dissection
+const EX={on:false,k:0,t:0,scope:'all',set:[],C:new THREE.Vector3()};let DIS=false;
+const _eo=new THREE.Vector3();
+function exCollect(){
+  exRestore();const sel=EX.scope==='sel'&&S.sel&&!S.sel.ins?S.sel:null,vis=parts.filter(p=>p.sys.on&&!p.hidden&&!p.ins&&!p.ghost);
+  if(sel){pbox(sel);EX.C.copy(sel.center)}else{const b=new THREE.Box3();vis.forEach(p=>b.union(pbox(p)));b.getCenter(EX.C)}
+  const R=sel?Math.max(sel.radius*2.5,.14):1e9;
+  for(const p of vis){pbox(p);const d=p.center.clone().sub(EX.C),l=d.length();if(l<1e-4||(sel&&p!==sel&&l-p.radius>R))continue;
+    p.exDir=d.multiplyScalar((sel?Math.min(l,.3)*1.25:l*.85)/l);EX.set.push(p)}}
+function exApply(){
+  for(const p of EX.set){_eo.copy(p.exDir).multiplyScalar(EX.k);
+    for(const m of p.meshes){const u=m.userData;if(!u.w0){u.w0=m.matrixWorld.clone();u.l0=m.matrix.clone();u.pinv=m.parent.matrixWorld.clone().invert()}
+      m.matrix.makeTranslation(_eo.x,_eo.y,_eo.z).multiply(u.w0).premultiply(u.pinv);m.updateMatrixWorld(true)}
+    p.exOff=EX.k?_eo.clone():null}
+  pickDirty=true;invalidate()}
+function exRestore(){for(const p of EX.set){for(const m of p.meshes){const u=m.userData;if(u.l0){m.matrix.copy(u.l0);m.updateMatrixWorld(true)}}p.exOff=null}EX.set=[];EX.k=0;pickDirty=true}
+function exUI(){$('#exPop').classList.toggle('on',EX.on);$('#exBtn').classList.toggle('on',EX.on);$$('#exScope button').forEach(b=>b.classList.toggle('on',b.dataset.s===EX.scope));const c=$('#cardBody [data-a=explode]');if(c)c.classList.toggle('on',EX.on&&EX.scope==='sel')}
+function exOff(){if(!EX.on&&!EX.set.length)return;EX.on=false;EX.t=0;exRestore();exUI();invalidate()}
+function setExplode(on,scope){
+  if(!on){EX.on=false;EX.t=0;exUI();invalidate();return}
+  if(Q.on)return;if(LM.bone){closeLm();card()}if(INS.owner)closeIns();
+  if(scope)EX.scope=scope;if(EX.scope==='sel'&&(!S.sel||S.sel.ins))EX.scope='all';
+  exCollect();EX.on=true;EX.t=+$('#exPos').value/100*1.5;exUI();invalidate();
+  if(EX.set.length<2)toast('Affiche au moins deux structures pour les écarter')}
+async function explodeAround(){const p=S.sel;if(!p||p.ins||Q.on)return;
+  if(p.sys.id==='squelette'||p.sys.id==='articulations')for(const id of['squelette','articulations'])if(!SYSID[id].on)await setSys(SYSID[id],true);
+  setExplode(true,'sel');pbox(p);flyTo(p.center,Math.max(p.radius*2.6,.17))}
+function setDis(on,silent){DIS=on;$('#disBtn').classList.toggle('on',on);canvas.style.cursor='';if(on&&!silent)toast('Dissection : chaque clic retire une structure. Annuler (Z) la remet.')}
+$('#exBtn').onclick=()=>setExplode(!EX.on);$('#exClose').onclick=()=>setExplode(false);
+$('#exPos').oninput=e=>{EX.t=+e.target.value/100*1.5;invalidate()};
+$$('#exScope button').forEach(b=>b.onclick=()=>{if(b.dataset.s==='sel'&&(!S.sel||S.sel.ins)){toast('Sélectionne d\'abord une structure');return}setExplode(true,b.dataset.s)});
+$('#disBtn').onclick=()=>{if(!Q.on)setDis(!DIS)};
+$('#quizBtn').onclick=()=>{leftOpen(true);$('.tabs [data-tab=quiz]').click()};
 // ------------------------------------------------------------------ panneau de réglages
 const ROWS=[['h','Affichage'],['tog','shadows','Ombres portées'],['rng','shadowStrength','Intensité des ombres',.2,.95,.05],['tog','ground','Ombre au sol'],
  ['seg','detail','Relief des surfaces',[[0,'Aucun'],[1,'Léger'],[2,'Marqué']]],['rng','exposure','Luminosité',.6,1.7,.05],['seg','quality','Netteté',[['eco','Éco'],['auto','Auto'],['max','Max']]],
@@ -617,10 +655,11 @@ function buildSettings(){
   $('#setBody').innerHTML=ROWS.map(r=>r[0]==='h'?`<h3>${r[1]}</h3>`:r[0]==='tog'?`<label class="row"><span>${r[2]}</span><input type="checkbox" data-k="${r[1]}" ${CFG[r[1]]?'checked':''}></label>`
    :r[0]==='rng'?`<label class="row"><span>${r[2]}</span><input type="range" data-k="${r[1]}" min="${r[3]}" max="${r[4]}" step="${r[5]}" value="${CFG[r[1]]}"></label>`
    :`<div class="row"><span>${r[2]}</span><div class="seg">${r[3].map(o=>`<button data-k="${r[1]}" data-v="${o[0]}" class="${CFG[r[1]]==o[0]?'on':''}">${o[1]}</button>`).join('')}</div></div>`).join('')
-   +'<button class="big" id="setReset">Rétablir les réglages par défaut</button>'}
+   +'<button class="big" id="setShot">Enregistrer une image de la vue</button><button class="big" id="setReset">Rétablir les réglages par défaut</button>'}
 $('#settings').addEventListener('input',e=>{const t=e.target,k=t.dataset.k;if(!k)return;CFG[k]=t.type==='checkbox'?t.checked:+t.value;LS.set('cfg',CFG);applyCfg(k)});
 $('#settings').addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;
   if(b.id==='setClose'){$('#settings').classList.remove('on');$('#setBtn').classList.remove('on')}
+  else if(b.id==='setShot')shot();
   else if(b.id==='setReset'){Object.assign(CFG,DEF);LS.set('cfg',CFG);applyCfg('*');buildSettings()}
   else if(b.dataset.k){const v=b.dataset.v;setCfg(b.dataset.k,isNaN(+v)?v:+v)}});
 $('#setBtn').onclick=()=>{const on=!$('#settings').classList.contains('on');$('#settings').classList.toggle('on',on);$('#setBtn').classList.toggle('on',on);if(on)buildSettings()};
@@ -660,7 +699,7 @@ async function quizStart(only){
   if(pool.length<4){toast('Pas assez de structures pour ce quiz');quizPane();return}
   Q.pool=pool;Q.items=only?shuffle(only.slice()):order(pool).slice(0,Q.n);
   if(!Q.on){Q.snap=snap();Q.cam=[camera.position.clone(),controls.target.clone()]}
-  closeLm();if(INS.owner)closeIns(true);if(clip.on)setClip(false);
+  closeLm();if(INS.owner)closeIns(true);if(clip.on)setClip(false);exOff();setDis(false,true);
   Q.on=true;select(null);Q.on=true;hideTip();
   SYS.forEach(x=>{x.on=sset.includes(x)});for(const p of parts){p.ghost=false;p.flash=0;p.hidden=!sset.includes(p.sys)||defHidden(p)||(grpF&&boneGroup(p.en)!==Q.grp)}
   applyAll();SYS.forEach(sysRow);
