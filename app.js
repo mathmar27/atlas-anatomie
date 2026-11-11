@@ -114,7 +114,7 @@ function zoomAt(x,y,f){
   camera.position.sub(zB).multiplyScalar(f).add(zB);controls.target.sub(zB).multiplyScalar(f).add(zB);invalidate()}
 addEventListener('wheel',e=>{if(e.target!==canvas)return;e.preventDefault();e.stopPropagation();
   let dy=e.deltaY;if(e.deltaMode===1)dy*=32;else if(e.deltaMode===2)dy*=600;
-  lastZoom=performance.now();clearTimeout(restoreTimer);lowRes();restoreTimer=setTimeout(()=>{invalidate();if(curDpr!==fullDpr){curDpr=fullDpr;renderer.setPixelRatio(curDpr);resize()}},320);
+  lastZoom=performance.now();setTimeout(invalidate,260);
   const k=(e.ctrlKey?.0085:.0015)*CFG.zoom*(CFG.invertZoom?-1:1);zoomAt(e.clientX,e.clientY,Math.exp(THREE.MathUtils.clamp(dy*k,-.45,.45)))},{capture:true,passive:false});
 let tw=null;
 function flyTo(center,radius,dir,ms=650){
@@ -126,6 +126,7 @@ function loop(t){
   if(tw){const k=Math.min(1,(t-tw.t0)/tw.ms),e=k<.5?4*k*k*k:1-Math.pow(-2*k+2,3)/2;camera.position.lerpVectors(tw.p0,tw.p1,e);controls.target.lerpVectors(tw.q0,tw.q1,e);if(k>=1)tw=null;dirty=true}
   if(EX.k!==EX.t){const d=EX.t-EX.k;EX.k=Math.abs(d)<.004?EX.t:EX.k+d*.22;exApply();if(!EX.on&&EX.k===0)exRestore();dirty=true}
   controls.update();
+  {const d=camera.position.distanceTo(controls.target),n=THREE.MathUtils.clamp(d*.04,.0015,.12),f=d+3.2;if(Math.abs(camera.near-n)>n*.05||Math.abs(camera.far-f)>.3){camera.near=n;camera.far=f;camera.updateProjectionMatrix();dirty=true}}
   if(!dirty){lastT=t;return}
   if(moving){if(t-lastT>34)slow++;else slow=Math.max(0,slow-1);if(slow>6){if(curDpr>1){curDpr=1;renderer.setPixelRatio(1);renderer.setSize(innerWidth,innerHeight,false)}slow=0}}
   lastT=t;dirty=false;const still=!moving&&!tw&&t-lastZoom>200;updateLight(still);if(still&&CFG.shadows)renderer.shadowMap.needsUpdate=true;updatePins();renderer.render(scene,camera);layoutLabels()}
@@ -134,8 +135,8 @@ function loop(t){
 let CAT={names:{},landmarks:{}};
 const parts=[];const S={sel:null,hov:null,labels:CFG.labels,multi:new Set()};let MULTI=false;
 let pickDirty=true,pickables=[];
-const OPT=Object.assign({Fascia:false,Bursa:false,'White matter':false},LS.get('opt',{}));const LOADED=new Set();
-const defHidden=p=>!!p.ins||!!p.defOff||(p.mat in OPT&&!OPT[p.mat]);
+const OPT=Object.assign({Fascia:false,Bursa:false,'White matter':false,Segments:false},LS.get('opt',{}));const LOADED=new Set();
+const defHidden=p=>(p.optKey?!OPT[p.optKey]:p.optNeg?!!OPT[p.optNeg]:false)||!!p.ins||!!p.defOff||(p.mat in OPT&&!OPT[p.mat]);
 function splitName(n){n=n.replace(/\.\d{3}$/,'').trim();const m=n.match(/^(.*)\.([lr])$/);return m?[m[1].trim(),m[2]]:[n.replace(/\.$/,''),'']}
 const ABDO=/abdominal oblique|^Rectus abdominis|^Transversus abdominis|^Pyramidalis/;
 function tint(mn,orig,s,name){const c=tint0(mn,orig,s,name);if(s.id==='muscles'&&ABDO.test(name)){c.set(0xad4b3f);const h=(hash(name)%100)/100;c.offsetHSL(0,0,(h-.5)*.02)}return c}
@@ -222,7 +223,7 @@ function surfCompile(sh){
        float w=1.-d/r;w=w*w*(3.-2.*w);w=min(1.,w*1.6)*(i==uLmSel?.95:(uLmSel>=0?.45:.8));if(w>bw){bw=w;bc=uLmC[i];}}
      diffuseColor.rgb=mix(diffuseColor.rgb,bc,bw);}
     #endif`)
-    .replace('#include <dithering_fragment>','#include <dithering_fragment>\n if(uSec>.5&&!gl_FrontFacing){vec3 sc=diffuseColor.rgb*SECK;gl_FragColor=linearToOutputTexel(vec4(sc,1.));}')
+    .replace('#include <dithering_fragment>','#include <dithering_fragment>\n if(!gl_FrontFacing){if(uSec>.5){vec3 sc=diffuseColor.rgb*SECK;gl_FragColor=linearToOutputTexel(vec4(sc,1.));}else gl_FragColor.rgb*=.55;}')
     .replace('#include <roughnessmap_fragment>',`#include <roughnessmap_fragment>
     #ifdef SURF_DETAIL
      roughnessFactor=clamp(roughnessFactor+(.45-gH)*.3*uDetail,.18,1.);
@@ -243,11 +244,14 @@ function ingest(gltf,s){
     if(!p){const [base,side]=splitName(name),nm=CAT.names[name];
       p={id:parts.length,name,base,side,sys:s,mat:mn.replace(/-\d+$/,''),meshes:[],fr:nm?nm[0]:'',la:nm?nm[1]:'',en:base,hidden:false,ghost:false,lmOn:false,flash:0,box:null};
       if(s.id==='insertions'){const m=name.match(/^(.*)\.([oe])(\d*)([lr])?$/);if(m){p.ins={muscle:m[1].replace(/^\(|\)$/g,''),type:m[2],side:m[4]||''};p.en=p.ins.muscle;p.side=p.ins.side}}
+      if(/segment of liver|^Posterior segment of liver/.test(base))p.optKey='Segments';else if(base==='Liver')p.optNeg='Segments';
       p.hidden=defHidden(p);
       owners.set(owner,p);parts.push(p);s.parts.push(p);LOADED.add(name)}
     const base=tint(mn,o.material.color||new THREE.Color(1,1,1),s,p.base);
     const mat=new THREE.MeshStandardMaterial({color:base.clone(),roughness:s.rough,metalness:0,envMapIntensity:.7,side:o.material.side});
-    mat.userData.kind=kindOf(mn,s);mat.onBeforeCompile=surfCompile;mat.customProgramCacheKey=surfKey;o.castShadow=o.receiveShadow=true;
+    mat.userData.kind=kindOf(mn,s);mat.userData.side0=[0,1,2].includes(mat.userData.kind)&&s.id!=='regions'?THREE.DoubleSide:o.material.side;mat.side=mat.userData.side0;
+    if(mat.userData.kind===3){mat.polygonOffset=true;mat.polygonOffsetFactor=-1;mat.polygonOffsetUnits=-2}
+    mat.onBeforeCompile=surfCompile;mat.customProgramCacheKey=surfKey;o.castShadow=o.receiveShadow=true;
     if(s.id==='insertions'){mat.polygonOffset=true;mat.polygonOffsetFactor=-3;mat.polygonOffsetUnits=-3}
     if(SEX==='f')warpMesh(o,name);
     mat.userData.base=base;o.material=mat;o.userData.part=p;p.meshes.push(o);o.matrixAutoUpdate=false});
@@ -611,7 +615,7 @@ $('#tree').addEventListener('click',e=>{
   const g=e.target.closest('.grp>button');if(g){const id=g.parentNode.dataset.g;if(openGrp.has(id))openGrp.delete(id);else openGrp.add(id);buildTree();return}
   const b=e.target.closest('.it');if(!b||Q.on)return;
   if(b.dataset.fav){const k=b.dataset.fav,sy=SYSID[k.split('|')[0]];if(sy)setSys(sy,true).then(()=>{const p=parts.find(x=>!x.ins&&pkey(x)===k);if(p){if(p.hidden){p.hidden=false;apply(p)}select(p,true)}});return}
-  const p=parts[+b.dataset.id];if(!p.sys.on){p.sys.on=true;p.sys.parts.forEach(apply);sysRow(p.sys);buildTree()}if(p.hidden){pushUndo();p.hidden=false;apply(p);b.classList.remove('hid')}select(p,true)});
+  const p=parts[+b.dataset.id];if(p.optKey&&!OPT[p.optKey]){enableOpt(p.optKey).then(()=>select(p,true));return}if(!p.sys.on){p.sys.on=true;p.sys.parts.forEach(apply);sysRow(p.sys);buildTree()}if(p.hidden){pushUndo();p.hidden=false;apply(p);b.classList.remove('hid')}select(p,true)});
 $('#tree').addEventListener('mouseover',e=>{const b=e.target.closest('.it[data-id]');setHover(b?parts[+b.dataset.id]:null)});
 let resCur=0,resList=[];
 function doSearch(){
@@ -639,7 +643,7 @@ function setClip(on){
   clip.on=on;$('#clipPop').classList.toggle('on',on);$('#clipBtn').classList.toggle('on',on);
   if(on){clip.box=visibleBox();if(clip.box.isEmpty())clip.box.set(new THREE.Vector3(-1,0,-1),new THREE.Vector3(1,1.8,1));updClip()}
   renderer.clippingPlanes=on?[clip.plane]:[];SURF.uSec.value=on?1:0;
-  for(const p of parts)if(!p.gen)for(const m of p.meshes){const sd=on?THREE.DoubleSide:THREE.FrontSide;if(m.material.side!==sd){m.material.side=sd;m.material.needsUpdate=true}}
+  for(const p of parts)if(!p.gen)for(const m of p.meshes){const sd=on?THREE.DoubleSide:(m.material.userData.side0??THREE.FrontSide);if(m.material.side!==sd){m.material.side=sd;m.material.needsUpdate=true}}
   pickDirty=true;invalidate()}
 function updClip(){const a=clip.axis,k=+$('#clipPos').value/1000,v=clip.box.min[a]+(clip.box.max[a]-clip.box.min[a])*k,s=clip.flip?1:-1;
   clip.plane.normal.set(a==='x'?s:0,a==='y'?s:0,a==='z'?s:0);clip.plane.constant=-s*v;invalidate()}
@@ -884,13 +888,13 @@ function quizKey(e,k){
 // ------------------------------------------------------------------ démarrage
 SYS.forEach(sysRow);
 $$('#optList button').forEach(b=>{const k=b.dataset.opt;b.classList.toggle('on',!!OPT[k]);b.onclick=()=>{if(Q.on)return;OPT[k]=!OPT[k];LS.set('opt',OPT);b.classList.toggle('on',OPT[k]);
-  loadExtra(k).then(()=>{for(const p of parts)if(p.mat===k){p.hidden=!OPT[k];apply(p)}buildTree()})}});
+  loadExtra(k).then(()=>{for(const p of parts)if(p.mat===k||p.optKey===k||p.optNeg===k){p.hidden=defHidden(p);apply(p)}buildTree()})}});
 async function loadExtra(k){for(const s of SYS){if(!s.extra||!s.extra[k]||s.state!=='ready'||(s.xl&&s.xl[k])||!OPT[k])continue;s.xl=s.xl||{};s.xl[k]=1;
   loading++;setLoader(.3);try{const g=await new Promise((res,rej)=>gltfL.load(EXPORT+s.extra[k],res,null,rej));const n0=s.parts.length;ingest(g,s);const nw=s.parts.slice(n0);
     nw.forEach(apply);for(const p of nw)IDX.push({t:norm(p.fr+' '+p.la+' '+p.en),p});s.parts.sort((a,b)=>title(a).localeCompare(title(b),'fr')||a.side.localeCompare(b.side));sysRow(s)}
   catch{s.xl[k]=0;toast('Impossible de charger '+s.extra[k])}finally{loading--;setLoader(1)}}}
-function disableOpt(k){OPT[k]=false;LS.set('opt',OPT);const b=$(`#optList [data-opt="${k}"]`);if(b)b.classList.remove('on');for(const p of parts)if(p.mat===k){p.hidden=true;apply(p)}}
-async function enableOpt(k){if(OPT[k])return;OPT[k]=true;LS.set('opt',OPT);const b=$(`#optList [data-opt="${k}"]`);if(b)b.classList.add('on');await loadExtra(k);for(const p of parts)if(p.mat===k){p.hidden=false;apply(p)}}
+function disableOpt(k){OPT[k]=false;LS.set('opt',OPT);const b=$(`#optList [data-opt="${k}"]`);if(b)b.classList.remove('on');for(const p of parts)if(p.mat===k||p.optKey===k||p.optNeg===k){p.hidden=defHidden(p);apply(p)}}
+async function enableOpt(k){if(OPT[k])return;OPT[k]=true;LS.set('opt',OPT);const b=$(`#optList [data-opt="${k}"]`);if(b)b.classList.add('on');await loadExtra(k);for(const p of parts)if(p.mat===k||p.optKey===k||p.optNeg===k){p.hidden=defHidden(p);apply(p)}}
 if(innerWidth<900)leftOpen(false);
 (async()=>{
   try{CAT=await (await fetch('data/catalog.json?v='+VER)).json()}catch(e){$('#splashMsg').className='err';$('#splashMsg').textContent="Données introuvables (data/catalog.json). Lance l'appli avec « Lancer l'atlas.command ».";return}

@@ -59,7 +59,7 @@ button.on kbd{color:inherit;border-color:currentColor;opacity:.7}
 .tabs button.on{background:var(--panel3);color:var(--tx)}
 .pane{display:none;flex:1;min-height:0;padding:10px 12px 12px}.pane.on{display:block}
 #pane-explore.on{display:flex;flex-direction:column}#sysBox{flex:none}#tree{flex:1;min-height:0}
-#sysList{display:grid;grid-template-columns:1fr 1fr;gap:1px 4px}#optList{margin:6px 0 0;flex-wrap:wrap}#optList button{font-size:12px;padding:4px 6px}
+#sysList{display:grid;grid-template-columns:1fr 1fr;gap:1px 4px}#optList{margin:6px 0 0;display:grid;grid-template-columns:1fr 1fr;gap:4px}#optList button{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}#optList button{font-size:12px;padding:4px 6px}
 .hrow{display:flex;align-items:center;justify-content:space-between}.hrow .seg{flex:none;text-transform:none;letter-spacing:0}.hrow .seg button{font-size:11.5px;padding:2px 9px;min-height:0;color:var(--tx)}.hrow .seg button.on{color:var(--accInk)}
 .vgrid{display:grid;grid-template-columns:1fr 1fr;gap:5px}.vgrid button{text-align:left;padding:8px 10px;font-size:12.5px}.mv{display:flex;gap:2px;min-width:0}.mv button:first-child{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.mv button:last-child{padding:8px 9px;color:var(--mut)}
 #mvName{flex:1;min-width:0;background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:6px 8px}
@@ -205,7 +205,7 @@ select option{color:#111}
   <div class="tabs"><button data-tab="explore" class="on">Explorer</button><button data-tab="views">Vues</button><button data-tab="quiz">Quiz</button></div>
   <div id="pane-explore" class="pane on">
     <div id="sysBox"><h3 class="hrow">Systèmes</h3><div id="sysList"></div>
-    <div class="seg" id="optList"><button data-opt="Fascia" title="Afficher aussi les fascias">+ Fascias</button><button data-opt="Bursa" title="Afficher aussi les bourses synoviales">+ Bourses</button><button data-opt="White matter" title="Afficher aussi les structures profondes de l'encéphale (substance blanche, commissures, hypothalamus…)">+ Encéphale profond</button></div></div>
+    <div class="seg" id="optList"><button data-opt="Fascia" title="Afficher aussi les fascias">+ Fascias</button><button data-opt="Bursa" title="Afficher aussi les bourses synoviales">+ Bourses</button><button data-opt="White matter" title="Afficher aussi les structures profondes de l'encéphale (substance blanche, commissures, hypothalamus…)">+ Encéphale profond</button><button data-opt="Segments" title="Remplacer le foie entier par ses 8 segments (Couinaud)">+ Segments du foie</button></div></div>
     <h3>Structures</h3><div id="tree" class="scroll"></div>
   </div>
   <div id="pane-views" class="pane scroll"></div>
@@ -263,6 +263,6 @@ select option{color:#111}
 window.addEventListener('error',e=>{const m=document.getElementById('splashMsg');if(m&&document.getElementById('splash').style.opacity!=='0'){m.className='err';
   m.textContent=location.protocol==='file:'?"Ouvre l'appli avec « Lancer l'atlas.command » (double-clic), pas en ouvrant index.html directement.":'Erreur de chargement : '+(e.message||'réseau')}} ,true);
 </script>
-<script type="module" src="app.js?v=42"></script>
+<script type="module" src="app.js?v=44"></script>
 </body>
 </html>
