@@ -40,7 +40,7 @@ function warpMesh(o,name){
 const SYS=[
  {id:'squelette',label:'Squelette',files:['squelette.glb','sesamoides_main.glb'],color:0xe6d9bd,rough:.66},
  {id:'articulations',label:'Articulations et ligaments',files:['articulations.glb'],color:0xa9c2ab,rough:.6},
- {id:'muscles',label:'Muscles',files:['muscles.glb'],color:0xa9463e,rough:.46},
+ {id:'muscles',label:'Muscles',files:['muscles_seuls.glb'],extra:{Fascia:'fascias.glb',Bursa:'bourses.glb'},color:0xa9463e,rough:.46},
  {id:'vaisseaux',label:'Cardiovasculaire',files:['vaisseaux.glb'],color:0xd9534f,rough:.36},
  {id:'nerfs',label:'Nerveux et organes des sens',files:['nerfs.glb'],color:0xead25c,rough:.5},
  {id:'visceres',label:'Viscères',files:['visceres.glb'],color:0xc98a7a,rough:.38},
@@ -161,9 +161,15 @@ function taubin(g,it){const P=g.attributes.position.array,n=P.length/3,I=g.index
       Q[i*3]=P[i*3]+f*(x*w-P[i*3]);Q[i*3+1]=P[i*3+1]+f*(y*w-P[i*3+1]);Q[i*3+2]=P[i*3+2]+f*(z*w-P[i*3+2])}
     P.set(Q)}
   g.attributes.position.needsUpdate=true;g.computeVertexNormals();g.computeBoundingBox();g.computeBoundingSphere()}
+function sheathMask(s){
+  const R=s.parts.filter(p=>/^(Rectus abdominis|Pyramidalis) muscle/.test(p.name)).flatMap(p=>p.meshes),C=.003,H=new Map(),v=new THREE.Vector3(),key=(x,y)=>x+','+y;
+  for(const m of R){const P=m.geometry.attributes.position;for(let i=0;i<P.count;i++){v.fromBufferAttribute(P,i).applyMatrix4(m.matrixWorld);const k=key(Math.floor(v.x/C),Math.floor(v.y/C));const z=H.get(k);if(z===undefined||v.z>z)H.set(k,v.z)}}
+  const zAt=(x,y)=>{let z=-1e9,n=0;for(let a=-2;a<=2;a++)for(let b=-2;b<=2;b++){const q=H.get(key(x+a,y+b));if(q!==undefined){n++;if(q>z)z=q}}return n>=14?z:null};
+  for(const p of s.parts)for(const m of p.meshes){const A=m.geometry.attributes.aCov;if(!A)continue;const P=m.geometry.attributes.position;
+    for(let i=0;i<P.count;i++){v.fromBufferAttribute(P,i).applyMatrix4(m.matrixWorld);const z=zAt(Math.floor(v.x/C),Math.floor(v.y/C));A.setX(i,z!==null&&v.z>z-.02?1:0)}A.needsUpdate=true}}
 function fixOblique(o,mat){const g=o.geometry;if(g.index&&g.attributes.position.count>40000)taubin(g,5);const P=g.attributes.position,a=new Float32Array(P.count),v=new THREE.Vector3();
   const cv=new Float32Array(P.count);
-  for(let i=0;i<P.count;i++){v.fromBufferAttribute(P,i).applyMatrix4(o.matrixWorld);const ax=Math.abs(v.x),b=.087+.034*(1-sm(.935,1.0,v.y));a[i]=1-sm(b-.009,b+.009,ax);cv[i]=(1-sm(.079,.086,ax))*sm(.845,.86,v.y)*sm(-.02,.0,v.z)}
+  for(let i=0;i<P.count;i++){v.fromBufferAttribute(P,i).applyMatrix4(o.matrixWorld);const ax=Math.abs(v.x),b=.087+.034*(1-sm(.935,1.0,v.y));a[i]=1-sm(b-.009,b+.009,ax)}
   g.setAttribute('aApo',new THREE.BufferAttribute(a,1));g.setAttribute('aCov',new THREE.BufferAttribute(cv,1));mat.userData.apo=true;mat.userData.apoU={value:1}}
 const GLSL_NOISE=`
 float h13(vec3 p){p=fract(p*.1031);p+=dot(p,p.zyx+31.32);return fract((p.x+p.y)*p.z);}
@@ -289,10 +295,11 @@ function loadSys(s){
   if(s.promise)return s.promise;
   s.state='loading';loading++;sysRow(s);
   s.promise=(async()=>{
-    const prog=s.files.map(()=>0);
+    s.xl=s.xl||{};const files=s.files.concat(Object.keys(s.extra||{}).filter(k=>OPT[k]).map(k=>(s.xl[k]=1,s.extra[k])));
+    const prog=files.map(()=>0);
     try{
-      const gl=await Promise.all(s.files.map((f,i)=>new Promise((res,rej)=>gltfL.load(EXPORT+encodeURI(f),res,e=>{if(e.total){prog[i]=e.loaded/e.total;s.prog=prog.reduce((a,b)=>a+b,0)/prog.length;sysRow(s);setLoader(s.prog*.95)}},rej))));
-      gl.forEach(g=>ingest(g,s));if(s.id==='feminin'&&SEX==='f')genFemale(s);s.state='ready';s.parts.forEach(apply);indexSys(s);
+      const gl=await Promise.all(files.map((f,i)=>new Promise((res,rej)=>gltfL.load(EXPORT+encodeURI(f),res,e=>{if(e.total){prog[i]=e.loaded/e.total;s.prog=prog.reduce((a,b)=>a+b,0)/prog.length;sysRow(s);setLoader(s.prog*.95)}},rej))));
+      gl.forEach(g=>ingest(g,s));if(s.id==='feminin'&&SEX==='f')genFemale(s);if(s.id==='muscles')sheathMask(s);s.state='ready';s.parts.forEach(apply);indexSys(s);
     }catch(e){s.state='';s.promise=null;toast('Impossible de charger « '+s.label+' » ('+s.files.join(', ')+')');throw e}
     finally{loading--;setLoader(1);sysRow(s)}
   })();
@@ -917,7 +924,11 @@ function genFemale(s){
 // ------------------------------------------------------------------ démarrage
 SYS.forEach(sysRow);
 $$('#optList button').forEach(b=>{const k=b.dataset.opt;b.classList.toggle('on',!!OPT[k]);b.onclick=()=>{if(Q.on)return;OPT[k]=!OPT[k];LS.set('opt',OPT);b.classList.toggle('on',OPT[k]);
-  for(const p of parts)if(p.mat===k){p.hidden=!OPT[k];apply(p)}buildTree()}});
+  loadExtra(k).then(()=>{for(const p of parts)if(p.mat===k){p.hidden=!OPT[k];apply(p)}buildTree()})}});
+async function loadExtra(k){for(const s of SYS){if(!s.extra||!s.extra[k]||s.state!=='ready'||(s.xl&&s.xl[k])||!OPT[k])continue;s.xl=s.xl||{};s.xl[k]=1;
+  loading++;setLoader(.3);try{const g=await new Promise((res,rej)=>gltfL.load(EXPORT+s.extra[k],res,null,rej));const n0=s.parts.length;ingest(g,s);const nw=s.parts.slice(n0);
+    nw.forEach(apply);for(const p of nw)IDX.push({t:norm(p.fr+' '+p.la+' '+p.en),p});s.parts.sort((a,b)=>title(a).localeCompare(title(b),'fr')||a.side.localeCompare(b.side));sysRow(s)}
+  catch{s.xl[k]=0;toast('Impossible de charger '+s.extra[k])}finally{loading--;setLoader(1)}}}
 if(innerWidth<900)leftOpen(false);
 (async()=>{
   try{CAT=await (await fetch('data/catalog.json')).json()}catch(e){$('#splashMsg').className='err';$('#splashMsg').textContent="Données introuvables (data/catalog.json). Lance l'appli avec « Lancer l'atlas.command ».";return}
