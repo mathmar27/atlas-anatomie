@@ -510,7 +510,7 @@ function ficheOf(p){if(p.sys.id!=='muscles'||!MUS.length)return null;if(p._fi!==
 function card(){
   if(S.multi.size&&!Q.on){multiCard();return}
   const p=S.sel,el=$('#card');if(!p||Q.on){el.classList.remove('on');sheetOffset();return}
-  el.classList.add('on');const lm=CAT.landmarks[p.name],bone=p.sys.id==='squelette',key=p.sys.id+'|'+p.base;
+  el.classList.add('on');if(el.dataset.pid!==String(p.id)){el.dataset.pid=p.id;el.classList.remove('full')}const lm=CAT.landmarks[p.name],bone=p.sys.id==='squelette',key=p.sys.id+'|'+p.base;
   const type=FUNC[p.mat]?'':TYPE[p.mat]||'';
   $('#cardHead').innerHTML=`<button class="x" data-a="close" title="Fermer (Échap)">×</button><button class="star ${FAV[key]?'on':''}" data-a="fav" title="Favori : à réviser (S)">★</button><h1>${esc(title(p))}</h1>${LA(p.la)?`<div class="la">${esc(p.la)}</div>`:''}${CFG.english&&p.en!==p.fr?`<div class="en">${esc(p.en)}</div>`:''}
    <div class="chips">${p.sys.internal?'':`<button class="chip" data-chip="sys" title="Afficher uniquement ce système">${esc(p.sys.label)}</button>`}${p.side?`<button class="chip" data-chip="side" title="Afficher uniquement ce côté du corps">Côté <b>${p.side==='r'?'droit':'gauche'}</b></button>`:''}${type?`<button class="chip" data-chip="type" title="Afficher uniquement les structures de ce type">${esc(type)}</button>`:''}${FUNC[p.mat]?`<button class="chip" data-chip="type" title="Afficher uniquement ce groupe musculaire">Groupe <b>${esc(FUNC[p.mat])}</b></button>`:''}</div>`;
@@ -598,6 +598,7 @@ async function showDesc(noLm){
   if(d){DESC[t.key]=d;const ks=Object.keys(DESC);if(ks.length>450)ks.slice(0,120).forEach(k=>delete DESC[k]);LS.set('desc',DESC)}
   if(tok!==descTok)return;if(thin(d))return showDesc(true);paintDesc(t,d)}
 $('#card').addEventListener('click',e=>{
+  if(innerWidth<=820&&e.target.closest('#cardHead')&&!e.target.closest('button')){$('#card').classList.toggle('full');sheetOffset();return}
   const b=e.target.closest('button');if(!b)return;if(S.multi.size){multiAct(b);return}const p=S.sel;if(!p)return;
   if(b.dataset.lm!==undefined){selectLm(+b.dataset.lm,true);return}
   if(b.dataset.ins!==undefined){const q=parts[+b.dataset.ins];pbox(q);flyTo(q.center,Math.max(q.radius*2.2,.04));return}
@@ -605,7 +606,8 @@ $('#card').addEventListener('click',e=>{
   const a=b.dataset.a;
   if(a==='explode'){if(EX.on)setExplode(false);else explodeAround()}else if(a==='fav')toggleFav();else if(a==='prev')step(-1);else if(a==='next')step(1);else if(a==='more')b.parentNode.classList.add('open');
   else if(a==='close')select(null);else if(a==='iso')isolate(p);else if(a==='hide')hideSel();else if(a==='ghost')ghostOthers();else if(a==='focus')focusSel();
-  else if(a==='lm')toggleLm();else if(a==='ins'){if(INS.owner===p)closeIns();else openIns(p)}});
+  if((a==='lm'||a==='ins')&&innerWidth<=820)$('#card').classList.add('full');
+  if(a==='lm')toggleLm();else if(a==='ins'){if(INS.owner===p)closeIns();else openIns(p)}});
 $('#card').addEventListener('mouseover',e=>{const b=e.target.closest('[data-lm]');setLmHover(b?+b.dataset.lm:-1)});
 function toggleLm(){const p=S.sel;if(!p||!CAT.landmarks[p.name])return;if(LM.bone===p)closeLm();else{openLm(p);focusSel()}card()}
 

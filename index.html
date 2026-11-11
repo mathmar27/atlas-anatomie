@@ -186,6 +186,19 @@ select option{color:#111}
 #left{width:min(316px,calc(100vw - 24px))}#card{top:auto;bottom:66px;left:12px;right:12px;width:auto;max-height:40vh}#bar{overflow:auto}#qzOpts{grid-template-columns:1fr}}
 @media (max-width:1500px){#bar kbd{display:none}#bar button{padding:7px 8px}}
 @media (min-width:821px) and (max-width:900px){#bar{flex-wrap:wrap;justify-content:center;max-width:min(470px,calc(100vw - var(--L) - 24px))}#bar .sep{display:none}#card{max-height:calc(100vh - 176px)}#clipPop,#exPop{bottom:106px}}
+@media (max-width:820px){
+ #card{max-height:none;transition:none}
+ #cardHead{padding:8px 44px 8px 14px;cursor:pointer;position:relative}
+ #cardHead::before{content:"";position:absolute;left:50%;top:5px;width:34px;height:4px;margin-left:-17px;border-radius:3px;background:var(--line)}
+ #cardHead h1{font-size:15px;margin:4px 40px 0 0}#cardHead .la{font-size:12.5px}#cardHead .x{top:6px}#cardHead .star{top:6px}
+ #cardBody{padding:8px 10px 10px}
+ #card:not(.full) .chips,#card:not(.full) #cardHead .en{display:none}
+ #card:not(.full) #cardBody>*:not(.acts){display:none}
+ #card:not(.full) .acts{display:flex;gap:6px;overflow-x:auto;scrollbar-width:none}#card:not(.full) .acts::-webkit-scrollbar{display:none}
+ #card:not(.full) .acts button{flex:none;white-space:nowrap;padding:6px 10px}
+ #card:not(.full) #cardHead::after{content:"Toucher pour les détails";display:block;font-size:11px;color:var(--mut);margin-top:2px}
+ #card.full{max-height:70vh}#card.full #cardHead::after{content:"Toucher pour réduire";display:block;font-size:11px;color:var(--mut);margin-top:2px}
+}
 @media (prefers-reduced-motion:reduce){*{transition:none!important}}
 </style>
 </head>
@@ -263,6 +276,6 @@ select option{color:#111}
 window.addEventListener('error',e=>{const m=document.getElementById('splashMsg');if(m&&document.getElementById('splash').style.opacity!=='0'){m.className='err';
   m.textContent=location.protocol==='file:'?"Ouvre l'appli avec « Lancer l'atlas.command » (double-clic), pas en ouvrant index.html directement.":'Erreur de chargement : '+(e.message||'réseau')}} ,true);
 </script>
-<script type="module" src="app.js?v=50"></script>
+<script type="module" src="app.js?v=51"></script>
 </body>
 </html>
