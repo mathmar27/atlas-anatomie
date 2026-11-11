@@ -17,7 +17,7 @@ const LS={get(k,d){try{const v=localStorage.getItem('atlas.'+k);return v==null?d
 // ------------------------------------------------------------------ réglages
 const MOBILE=matchMedia('(pointer:coarse)').matches||Math.min(innerWidth,innerHeight)<600;
 const DEF={shadows:!MOBILE,shadowStrength:.65,ground:true,detail:MOBILE?0:1,exposure:1.05,quality:'auto',fov:30,zoom:1,rotate:1,invertZoom:false,inertia:true,
- pin:1,halo:1,labels:!MOBILE,ghost:.07,tips:true,sex:'m',sheath:false};
+ pin:1,halo:1,labels:!MOBILE,ghost:.07,tips:true,sex:'m'};
 const CFG=Object.assign({},DEF,LS.get('cfg',{}));
 // ------------------------------------------------------------------ morphologie féminine (déformation du modèle de base)
 const SEX=CFG.sex==='f'?'f':'m',SCL=SEX==='f'?.93:1;
@@ -40,7 +40,7 @@ function warpMesh(o,name){
 const SYS=[
  {id:'squelette',label:'Squelette',files:['squelette.glb','sesamoides_main.glb'],color:0xe6d9bd,rough:.66},
  {id:'articulations',label:'Articulations et ligaments',files:['articulations.glb'],color:0xa9c2ab,rough:.6},
- {id:'muscles',label:'Muscles',files:['muscles_seuls.glb'],extra:{Fascia:'fascias.glb',Bursa:'bourses.glb'},color:0xa9463e,rough:.46},
+ {id:'muscles',label:'Muscles',files:['muscles.glb'],color:0xa9463e,rough:.46},
  {id:'vaisseaux',label:'Cardiovasculaire',files:['vaisseaux.glb'],color:0xd9534f,rough:.36},
  {id:'nerfs',label:'Nerveux et organes des sens',files:['nerfs.glb'],color:0xead25c,rough:.5},
  {id:'visceres',label:'Viscères',files:['visceres.glb'],color:0xc98a7a,rough:.38},
@@ -144,33 +144,10 @@ function tint(mn,orig,s,name){
   const c=new THREE.Color(s.color);
   if(s.id==='muscles'||mn==='Trapezius'||mn==='Diaphragm'||FUNC[mn]){c.set(0xa9463e);const h=(hash(name)%100)/100;c.offsetHSL((h-.5)*.02,0,(h-.5)*.07)}
   return c}
-const SURF={uDetail:{value:0}};const SHEATH={value:0};
+const SURF={uDetail:{value:0}};
 function kindOf(mn,s){if(mn==='Black')return 6;if(/^Bone|^Os-|Teeth|Suture|Dentine/.test(mn))return 1;if(/Tendon|Ligament|Fascia|capsule|Cartilage/i.test(mn))return 5;if(s.id==='muscles'||FUNC[mn])return 2;
   return{vaisseaux:3,nerfs:3,lymphatique:3,regions:4,squelette:1,insertions:3}[s.id]||0}
-function surfKey(){return'surf'+(this.userData.kind|0)+(this.userData.halo?'h':'')+(CFG.detail>0?'d':'')+(this.userData.apo?'a':'')}
-// Oblique externe : maillage Z-Anatomy sculpté (≈ 50× plus dense que les autres muscles) qui inclut son aponévrose
-// (feuillet antérieur de la gaine des droits). On lisse le grain de sculpture et on teinte l'aponévrose en blanc nacré.
-function taubin(g,it){const P=g.attributes.position.array,n=P.length/3,I=g.index.array,deg=new Uint32Array(n+1);
-  for(let t=0;t<I.length;t+=3){deg[I[t]]+=2;deg[I[t+1]]+=2;deg[I[t+2]]+=2}
-  const off=new Uint32Array(n+1);for(let i=0;i<n;i++)off[i+1]=off[i]+deg[i];const adj=new Uint32Array(off[n]),fill=off.slice(0,n);
-  const add=(a,b)=>{adj[fill[a]++]=b};for(let t=0;t<I.length;t+=3){const a=I[t],b=I[t+1],c=I[t+2];add(a,b);add(a,c);add(b,a);add(b,c);add(c,a);add(c,b)}
-  const Q=new Float32Array(P.length);
-  for(let k=0;k<it*2;k++){const f=k%2?-.53:.5;
-    for(let i=0;i<n;i++){const o0=off[i],o1=off[i+1];if(o1===o0){Q[i*3]=P[i*3];Q[i*3+1]=P[i*3+1];Q[i*3+2]=P[i*3+2];continue}let x=0,y=0,z=0;
-      for(let j=o0;j<o1;j++){const q=adj[j]*3;x+=P[q];y+=P[q+1];z+=P[q+2]}const w=1/(o1-o0);
-      Q[i*3]=P[i*3]+f*(x*w-P[i*3]);Q[i*3+1]=P[i*3+1]+f*(y*w-P[i*3+1]);Q[i*3+2]=P[i*3+2]+f*(z*w-P[i*3+2])}
-    P.set(Q)}
-  g.attributes.position.needsUpdate=true;g.computeVertexNormals();g.computeBoundingBox();g.computeBoundingSphere()}
-function sheathMask(s){
-  const R=s.parts.filter(p=>/^(Rectus abdominis|Pyramidalis) muscle/.test(p.name)).flatMap(p=>p.meshes),C=.003,H=new Map(),v=new THREE.Vector3(),key=(x,y)=>x+','+y;
-  for(const m of R){const P=m.geometry.attributes.position;for(let i=0;i<P.count;i++){v.fromBufferAttribute(P,i).applyMatrix4(m.matrixWorld);const k=key(Math.floor(v.x/C),Math.floor(v.y/C));const z=H.get(k);if(z===undefined||v.z>z)H.set(k,v.z)}}
-  const zAt=(x,y)=>{let z=-1e9,n=0;for(let a=-2;a<=2;a++)for(let b=-2;b<=2;b++){const q=H.get(key(x+a,y+b));if(q!==undefined){n++;if(q>z)z=q}}return n>=14?z:null};
-  for(const p of s.parts)for(const m of p.meshes){const A=m.geometry.attributes.aCov;if(!A)continue;const P=m.geometry.attributes.position;
-    for(let i=0;i<P.count;i++){v.fromBufferAttribute(P,i).applyMatrix4(m.matrixWorld);const z=zAt(Math.floor(v.x/C),Math.floor(v.y/C));A.setX(i,z!==null&&v.z>z-.02?1:0)}A.needsUpdate=true}}
-function fixOblique(o,mat){const g=o.geometry;if(g.index&&g.attributes.position.count>40000)taubin(g,5);const P=g.attributes.position,a=new Float32Array(P.count),v=new THREE.Vector3();
-  const cv=new Float32Array(P.count);
-  for(let i=0;i<P.count;i++){v.fromBufferAttribute(P,i).applyMatrix4(o.matrixWorld);const ax=Math.abs(v.x),b=.087+.034*(1-sm(.935,1.0,v.y));a[i]=1-sm(b-.009,b+.009,ax)}
-  g.setAttribute('aApo',new THREE.BufferAttribute(a,1));g.setAttribute('aCov',new THREE.BufferAttribute(cv,1));mat.userData.apo=true;mat.userData.apoU={value:1}}
+function surfKey(){return'surf'+(this.userData.kind|0)+(this.userData.halo?'h':'')+(CFG.detail>0?'d':'')}
 const GLSL_NOISE=`
 float h13(vec3 p){p=fract(p*.1031);p+=dot(p,p.zyx+31.32);return fract((p.x+p.y)*p.z);}
 float vn(vec3 p){vec3 i=floor(p),f=fract(p);f=f*f*(3.-2.*f);
@@ -217,8 +194,6 @@ float surfH(vec3 p,float px){float h=0.;
 `;
 function surfCompile(sh){
   const u=this.userData,det=CFG.detail>0;Object.assign(sh.uniforms,LMU,SURF);
-  if(u.apo){sh.uniforms.uApoK=u.apoU;sh.uniforms.uSheath=SHEATH;sh.vertexShader=sh.vertexShader.replace('#include <common>','#include <common>\nattribute float aApo;attribute float aCov;varying float vApo;varying float vCov;').replace('#include <begin_vertex>','#include <begin_vertex>\nvApo=aApo;vCov=aCov;');
-    sh.fragmentShader=sh.fragmentShader.replace('#include <common>','#include <common>\nvarying float vApo;varying float vCov;uniform float uApoK;uniform float uSheath;').replace('#include <clipping_planes_fragment>','#include <clipping_planes_fragment>\nif(uSheath<.5&&vCov>.5)discard;').replace('#include <color_fragment>','#include <color_fragment>\ndiffuseColor.rgb=mix(diffuseColor.rgb,vec3(.74,.67,.56),vApo*uApoK);')}
   sh.vertexShader=sh.vertexShader.replace('#include <common>','#include <common>\nvarying vec3 vHP;varying vec3 vHN;')
     .replace('#include <begin_vertex>','#include <begin_vertex>\nvHP=(modelMatrix*vec4(transformed,1.)).xyz;vHN=normalize(mat3(modelMatrix)*objectNormal);');
   sh.fragmentShader=sh.fragmentShader.replace('#include <common>','#include <common>\nvarying vec3 vHP;varying vec3 vHN;uniform float uDetail;float gH=0.;\n#define KIND '+(u.kind|0)+'\n'+(det?'#define SURF_DETAIL\n':'')+(u.halo?'#define SURF_HALO\n':'')
@@ -266,7 +241,6 @@ function ingest(gltf,s){
     const mat=new THREE.MeshStandardMaterial({color:base.clone(),roughness:s.rough,metalness:0,envMapIntensity:.7,side:o.material.side});
     mat.userData.kind=kindOf(mn,s);mat.onBeforeCompile=surfCompile;mat.customProgramCacheKey=surfKey;o.castShadow=o.receiveShadow=true;
     if(s.id==='insertions'){mat.polygonOffset=true;mat.polygonOffsetFactor=-3;mat.polygonOffsetUnits=-3}
-    if(/^(External|Internal) abdominal oblique muscle|^Transversus abdominis muscle/.test(name))fixOblique(o,mat);
     if(SEX==='f')warpMesh(o,name);
     mat.userData.base=base;o.material=mat;o.userData.part=p;p.meshes.push(o);o.matrixAutoUpdate=false});
   root.traverse(o=>{o.matrixAutoUpdate=false});world.add(root)}
@@ -279,7 +253,6 @@ function apply(p){
   for(const m of p.meshes){m.visible=vis;const mt=m.material;
     if(mt.transparent!==p.ghost){mt.transparent=p.ghost;mt.depthWrite=!p.ghost;mt.needsUpdate=true}
     mt.opacity=p.ghost?CFG.ghost:1;m.renderOrder=p.ghost?5:0;m.castShadow=!p.ghost;
-    if(mt.userData.apoU)mt.userData.apoU.value=(p.flash||sel)?.25:1;
     if(p.flash){mt.color.copy(p.flash>0?GREEN:RED);mt.emissive.copy(mt.color).multiplyScalar(.25)}
     else if(sel){mt.color.copy(mt.userData.base).lerp(GOLD,.82);mt.emissive.setRGB(.26,.13,.0)}
     else{mt.color.copy(mt.userData.base);if(hov)mt.emissive.setRGB(.06,.085,.08);else mt.emissive.setRGB(0,0,0)}}
@@ -295,11 +268,10 @@ function loadSys(s){
   if(s.promise)return s.promise;
   s.state='loading';loading++;sysRow(s);
   s.promise=(async()=>{
-    s.xl=s.xl||{};const files=s.files.concat(Object.keys(s.extra||{}).filter(k=>OPT[k]).map(k=>(s.xl[k]=1,s.extra[k])));
-    const prog=files.map(()=>0);
+    const prog=s.files.map(()=>0);
     try{
-      const gl=await Promise.all(files.map((f,i)=>new Promise((res,rej)=>gltfL.load(EXPORT+encodeURI(f),res,e=>{if(e.total){prog[i]=e.loaded/e.total;s.prog=prog.reduce((a,b)=>a+b,0)/prog.length;sysRow(s);setLoader(s.prog*.95)}},rej))));
-      gl.forEach(g=>ingest(g,s));if(s.id==='feminin'&&SEX==='f')genFemale(s);if(s.id==='muscles')sheathMask(s);s.state='ready';s.parts.forEach(apply);indexSys(s);
+      const gl=await Promise.all(s.files.map((f,i)=>new Promise((res,rej)=>gltfL.load(EXPORT+encodeURI(f),res,e=>{if(e.total){prog[i]=e.loaded/e.total;s.prog=prog.reduce((a,b)=>a+b,0)/prog.length;sysRow(s);setLoader(s.prog*.95)}},rej))));
+      gl.forEach(g=>ingest(g,s));if(s.id==='feminin'&&SEX==='f')genFemale(s);s.state='ready';s.parts.forEach(apply);indexSys(s);
     }catch(e){s.state='';s.promise=null;toast('Impossible de charger « '+s.label+' » ('+s.files.join(', ')+')');throw e}
     finally{loading--;setLoader(1);sysRow(s)}
   })();
@@ -321,10 +293,9 @@ function pick(ev,pins=true){
   const r=canvas.getBoundingClientRect();ndc.set((ev.clientX-r.left)/r.width*2-1,-(ev.clientY-r.top)/r.height*2+1);rc.setFromCamera(ndc,camera);
   if(pins&&LM.bone){const h=rc.intersectObjects(LM.pins.filter(s=>s.visible),false);if(h.length)return{lm:h[0].object.userData.i}}
   if(pickDirty){pickables=[];for(const p of parts)if(p.sys.on&&!p.hidden&&!p.ghost)for(const m of p.meshes)pickables.push(m);pickDirty=false}
-  rc.firstHitOnly=!clip.on&&!!CFG.sheath;
+  rc.firstHitOnly=!clip.on;
   const hits=rc.intersectObjects(pickables,false);
-  for(const h of hits){if(clip.on&&clip.plane.distanceToPoint(h.point)<0)continue;
-    const cv=!CFG.sheath&&h.face&&h.object.geometry.attributes.aCov;if(cv&&cv.getX(h.face.a)+cv.getX(h.face.b)+cv.getX(h.face.c)>1.5)continue;return{part:h.object.userData.part,point:h.point}}
+  for(const h of hits){if(clip.on&&clip.plane.distanceToPoint(h.point)<0)continue;return{part:h.object.userData.part,point:h.point}}
   return null}
 let down=null,hovRaf=0,lastMove=null;
 canvas.addEventListener('pointerdown',e=>{down={x:e.clientX,y:e.clientY,b:e.button};$('#results').classList.remove('on')});
@@ -731,7 +702,6 @@ const ROWS=[['h','Affichage'],['tog','shadows','Ombres portées'],['rng','shadow
  ['rng','fov','Perspective',14,60,1],
  ['h','Navigation'],['rng','zoom','Vitesse du zoom',.3,4,.1],['rng','rotate','Vitesse de rotation',.3,2.5,.1],['tog','invertZoom','Inverser le sens du zoom'],['tog','inertia','Inertie des mouvements'],
  ['h','Reliefs osseux'],['rng','pin','Taille des pastilles',.6,1.8,.1],['seg','halo','Halos colorés',[[0,'Aucun'],[1,'Normal'],[1.6,'Large']]],['tog','labels','Étiquettes autour de l\'os'],
- ['h','Anatomie'],['tog','sheath','Gaine des droits (aponévroses devant les abdominaux)'],
  ['h','Divers'],['rng','ghost','Opacité des structures estompées',.02,.35,.01],['tog','tips','Nom au survol de la souris']];
 function applyCfg(k){
   renderer.toneMappingExposure=CFG.exposure;
@@ -740,7 +710,7 @@ function applyCfg(k){
   if(camera.fov!==CFG.fov){const d=camera.position.distanceTo(controls.target),f=Math.tan(THREE.MathUtils.degToRad(camera.fov/2))/Math.tan(THREE.MathUtils.degToRad(CFG.fov/2));
     camera.position.sub(controls.target).multiplyScalar(f).add(controls.target);camera.fov=CFG.fov;camera.updateProjectionMatrix()}
   const d=dprFor();if(d!==fullDpr){fullDpr=curDpr=d;resize()}
-  SURF.uDetail.value=[0,.7,1.5][CFG.detail]||0;SHEATH.value=CFG.sheath?1:0;
+  SURF.uDetail.value=[0,.7,1.5][CFG.detail]||0;
   if(k==='detail'||k==='shadows'||k==='*')for(const p of parts)for(const m of p.meshes)m.material.needsUpdate=true;
   if(k==='ghost'||k==='*')for(const p of parts)if(p.ghost)apply(p);
   S.labels=CFG.labels;$('#labBtn').classList.toggle('on',CFG.labels);LMU.uLmK.value=CFG.halo;invalidate()}
@@ -924,11 +894,7 @@ function genFemale(s){
 // ------------------------------------------------------------------ démarrage
 SYS.forEach(sysRow);
 $$('#optList button').forEach(b=>{const k=b.dataset.opt;b.classList.toggle('on',!!OPT[k]);b.onclick=()=>{if(Q.on)return;OPT[k]=!OPT[k];LS.set('opt',OPT);b.classList.toggle('on',OPT[k]);
-  loadExtra(k).then(()=>{for(const p of parts)if(p.mat===k){p.hidden=!OPT[k];apply(p)}buildTree()})}});
-async function loadExtra(k){for(const s of SYS){if(!s.extra||!s.extra[k]||s.state!=='ready'||(s.xl&&s.xl[k])||!OPT[k])continue;s.xl=s.xl||{};s.xl[k]=1;
-  loading++;setLoader(.3);try{const g=await new Promise((res,rej)=>gltfL.load(EXPORT+s.extra[k],res,null,rej));const n0=s.parts.length;ingest(g,s);const nw=s.parts.slice(n0);
-    nw.forEach(apply);for(const p of nw)IDX.push({t:norm(p.fr+' '+p.la+' '+p.en),p});s.parts.sort((a,b)=>title(a).localeCompare(title(b),'fr')||a.side.localeCompare(b.side));sysRow(s)}
-  catch{s.xl[k]=0;toast('Impossible de charger '+s.extra[k])}finally{loading--;setLoader(1)}}}
+  for(const p of parts)if(p.mat===k){p.hidden=!OPT[k];apply(p)}buildTree()}});
 if(innerWidth<900)leftOpen(false);
 (async()=>{
   try{CAT=await (await fetch('data/catalog.json')).json()}catch(e){$('#splashMsg').className='err';$('#splashMsg').textContent="Données introuvables (data/catalog.json). Lance l'appli avec « Lancer l'atlas.command ».";return}
