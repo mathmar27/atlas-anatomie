@@ -9,6 +9,7 @@ const VER=new URL(import.meta.url).searchParams.get('v')||'0';
 const CDN='https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/';
 const EXPORT=/\/atlas\/(index\.html)?$/.test(location.pathname)?'../export/':'export/';
 const $=s=>document.querySelector(s),$$=s=>[...document.querySelectorAll(s)];
+const LA=x=>CFG.latin?x:'';
 const esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const norm=s=>String(s||'').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,'').replace(/[^a-z0-9]+/g,' ').trim();
 const hash=s=>{let h=2166136261;for(let i=0;i<s.length;i++){h^=s.charCodeAt(i);h=Math.imul(h,16777619)}return h>>>0};
@@ -18,7 +19,7 @@ const LS={get(k,d){try{const v=localStorage.getItem('atlas.'+k);return v==null?d
 // ------------------------------------------------------------------ réglages
 const MOBILE=matchMedia('(pointer:coarse)').matches||Math.min(innerWidth,innerHeight)<600;
 const DEF={shadows:!MOBILE,shadowStrength:.65,ground:true,detail:MOBILE?0:1,exposure:1.05,quality:'auto',fov:30,zoom:1,rotate:1,invertZoom:false,inertia:true,
- pin:1,halo:1,labels:!MOBILE,ghost:.07,tips:true,sex:'m'};
+ pin:1,halo:1,labels:!MOBILE,ghost:.07,tips:true,latin:true,english:false,sex:'m'};
 const CFG=Object.assign({},DEF,LS.get('cfg',{}));
 // ------------------------------------------------------------------ morphologie féminine (déformation du modèle de base)
 const SEX='m',SCL=1;
@@ -150,7 +151,7 @@ function tint0(mn,orig,s,name){
   const c=new THREE.Color(s.color);
   if(s.id==='muscles'||mn==='Trapezius'||mn==='Diaphragm'||FUNC[mn]){c.set(0xa9463e);const h=(hash(name)%100)/100;c.offsetHSL((h-.5)*.02,0,(h-.5)*.07)}
   return c}
-const SURF={uDetail:{value:0}};
+const SURF={uDetail:{value:0},uSec:{value:0}};
 function kindOf(mn,s){if(mn==='Black')return 6;if(/^Bone|^Os-|Teeth|Suture|Dentine/.test(mn))return 1;if(/Tendon|Ligament|Fascia|capsule|Cartilage/i.test(mn))return 5;if(s.id==='muscles'||FUNC[mn])return 2;
   return{vaisseaux:3,nerfs:3,lymphatique:3,regions:4,squelette:1,insertions:3}[s.id]||0}
 function surfKey(){return'surf'+(this.userData.kind|0)+(this.userData.halo?'h':'')+(CFG.detail>0?'d':'')}
@@ -202,8 +203,8 @@ function surfCompile(sh){
   const u=this.userData,det=CFG.detail>0;Object.assign(sh.uniforms,LMU,SURF);
   sh.vertexShader=sh.vertexShader.replace('#include <common>','#include <common>\nvarying vec3 vHP;varying vec3 vHN;')
     .replace('#include <begin_vertex>','#include <begin_vertex>\nvHP=(modelMatrix*vec4(transformed,1.)).xyz;vHN=normalize(mat3(modelMatrix)*objectNormal);');
-  sh.fragmentShader=sh.fragmentShader.replace('#include <common>','#include <common>\nvarying vec3 vHP;varying vec3 vHN;uniform float uDetail;float gH=0.;\n#define KIND '+(u.kind|0)+'\n'+(det?'#define SURF_DETAIL\n':'')+(u.halo?'#define SURF_HALO\n':'')
-      +'uniform int uLmCount;uniform int uLmSel;uniform float uLmK;uniform vec3 uLmP[64];uniform vec3 uLmN[64];uniform vec3 uLmC[64];uniform float uLmR[64];\n'+(det?GLSL_NOISE:''))
+  sh.fragmentShader=sh.fragmentShader.replace('#include <common>','#include <common>\nvarying vec3 vHP;varying vec3 vHN;uniform float uDetail;float gH=0.;\n#define KIND '+(u.kind|0)+'\n'+'#define SECK '+(u.kind===1?'.78':u.kind===2?'.62':'.7')+'\n'+(det?'#define SURF_DETAIL\n':'')+(u.halo?'#define SURF_HALO\n':'')
+      +'uniform float uSec;uniform int uLmCount;uniform int uLmSel;uniform float uLmK;uniform vec3 uLmP[64];uniform vec3 uLmN[64];uniform vec3 uLmC[64];uniform float uLmR[64];\n'+(det?GLSL_NOISE:''))
     .replace('#include <color_fragment>',`#include <color_fragment>
     #ifdef SURF_DETAIL
     {gH=surfH(vHP,length(fwidth(vHP)));diffuseColor.rgb*=1.+(gH-.45)*CAMP*uDetail;
@@ -221,6 +222,7 @@ function surfCompile(sh){
        float w=1.-d/r;w=w*w*(3.-2.*w);w=min(1.,w*1.6)*(i==uLmSel?.95:(uLmSel>=0?.45:.8));if(w>bw){bw=w;bc=uLmC[i];}}
      diffuseColor.rgb=mix(diffuseColor.rgb,bc,bw);}
     #endif`)
+    .replace('#include <dithering_fragment>','#include <dithering_fragment>\n if(uSec>.5&&!gl_FrontFacing){vec3 sc=diffuseColor.rgb*SECK;gl_FragColor=linearToOutputTexel(vec4(sc,1.));}')
     .replace('#include <roughnessmap_fragment>',`#include <roughnessmap_fragment>
     #ifdef SURF_DETAIL
      roughnessFactor=clamp(roughnessFactor+(.45-gH)*.3*uDetail,.18,1.);
@@ -313,11 +315,11 @@ canvas.addEventListener('dblclick',e=>{const h=pick(e,false);if(h&&h.part&&!Q.on
 function setHover(p){if(S.hov===p)return;const o=S.hov;S.hov=p;if(o)apply(o);if(p)apply(p)}
 function onHover(e){
   const h=pick(e);canvas.style.cursor=h?(DIS?'crosshair':'pointer'):'';
-  if(h&&h.lm!==undefined){setHover(null);setLmHover(h.lm);if(!Q.on||Q.answered){const L=LM.list[h.lm];showTip(e,L.fr||L.en,L.la)}else hideTip();return}
+  if(h&&h.lm!==undefined){setHover(null);setLmHover(h.lm);if(!Q.on||Q.answered){const L=LM.list[h.lm];showTip(e,L.fr||L.en,LA(L.la))}else hideTip();return}
   setLmHover(-1);
   if(Q.on&&(Q.mode==='lmname'||Q.mode==='lmfind')){setHover(null);hideTip();return}
   setHover(h?h.part:null);
-  if(h&&!Q.on&&CFG.tips)showTip(e,title(h.part)+(h.part.side?' · '+sideFr(h.part):''),h.part.la);else hideTip()}
+  if(h&&!Q.on&&CFG.tips)showTip(e,title(h.part)+(h.part.side?' · '+sideFr(h.part):''),LA(h.part.la));else hideTip()}
 function onClick(e){
   const h=pick(e);
   if(Q.on){quizClick(h);return}
@@ -482,7 +484,7 @@ function card(){
   const p=S.sel,el=$('#card');if(!p||Q.on){el.classList.remove('on');sheetOffset();return}
   el.classList.add('on');const lm=CAT.landmarks[p.name],bone=p.sys.id==='squelette',key=p.sys.id+'|'+p.base;
   const type=FUNC[p.mat]?'':TYPE[p.mat]||'';
-  $('#cardHead').innerHTML=`<button class="x" data-a="close" title="Fermer (Échap)">×</button><button class="star ${FAV[key]?'on':''}" data-a="fav" title="Favori : à réviser (S)">★</button><h1>${esc(title(p))}</h1>${p.la?`<div class="la">${esc(p.la)}</div>`:''}<div class="en">${esc(p.en)}</div>
+  $('#cardHead').innerHTML=`<button class="x" data-a="close" title="Fermer (Échap)">×</button><button class="star ${FAV[key]?'on':''}" data-a="fav" title="Favori : à réviser (S)">★</button><h1>${esc(title(p))}</h1>${LA(p.la)?`<div class="la">${esc(p.la)}</div>`:''}${CFG.english&&p.en!==p.fr?`<div class="en">${esc(p.en)}</div>`:''}
    <div class="chips">${p.sys.internal?'':`<button class="chip" data-chip="sys" title="Afficher uniquement ce système">${esc(p.sys.label)}</button>`}${p.side?`<button class="chip" data-chip="side" title="Afficher uniquement ce côté du corps">Côté <b>${p.side==='r'?'droit':'gauche'}</b></button>`:''}${type?`<button class="chip" data-chip="type" title="Afficher uniquement les structures de ce type">${esc(type)}</button>`:''}${FUNC[p.mat]?`<button class="chip" data-chip="type" title="Afficher uniquement ce groupe musculaire">Groupe <b>${esc(FUNC[p.mat])}</b></button>`:''}</div>`;
   const anyGhost=parts.some(q=>q.ghost&&q!==p);
   let h=`<div class="acts"><button data-a="iso">Isoler<kbd>I</kbd></button><button data-a="hide">Masquer<kbd>H</kbd></button>
@@ -490,13 +492,12 @@ function card(){
     ${lm?`<button class="wide ${LM.bone===p?'on':''}" data-a="lm">Reliefs osseux · ${lm.length}<kbd>R</kbd></button>`:''}
     ${bone&&!p.ins?`<button class="wide ${INS.owner===p?'on':''}" data-a="ins">Insertions musculaires sur cet os</button>`:''}
     ${p.sys.id==='muscles'&&FUNC[p.mat]?`<button class="wide ${INS.owner===p?'on':''}" data-a="ins">Origines et terminaisons</button>`:''}
-    ${p.ins?'':`<button class="wide ${EX.on?'on':''}" data-a="explode" title="Écarter les structures voisines pour voir comment elles s'assemblent">Éclater cette zone<kbd>E</kbd></button>`}
-    ${p.ins?'':`<button data-a="prev" title="Structure précédente de la liste">‹ Précédente<kbd>←</kbd></button><button data-a="next" title="Structure suivante de la liste">Suivante ›<kbd>→</kbd></button>`}</div>${(f=>f?`<h3>Fiche muscle</h3><dl class="facts">${FLD.map(x=>`<dt>${x[0]}</dt><dd>${esc(f[x[1]])}</dd>`).join('')}</dl><div class="src">Fiche intégrée à l'atlas (anatomie descriptive classique), disponible hors ligne.</div>`:'')(ficheOf(p))}<div id="desc"></div>`;
-  if(LM.bone===p){h+=`<h3>Reliefs</h3>`+LM.list.map(L=>`<button class="lm ${L.i===LM.sel?'sel':''}" data-lm="${L.i}" style="--c:${L.css}"><i>${L.i+1}</i><span>${esc(L.fr||L.en)}${L.la?`<small>${esc(L.la)}</small>`:''}</span></button>`).join('')
+    </div>${(f=>f?`<h3>Fiche muscle</h3><dl class="facts">${FLD.map(x=>`<dt>${x[0]}</dt><dd>${esc(f[x[1]])}</dd>`).join('')}</dl>`:'')(ficheOf(p))}<div id="desc"></div>`;
+  if(LM.bone===p){h+=`<h3>Reliefs</h3>`+LM.list.map(L=>`<button class="lm ${L.i===LM.sel?'sel':''}" data-lm="${L.i}" style="--c:${L.css}"><i>${L.i+1}</i><span>${esc(L.fr||L.en)}${LA(L.la)?`<small>${esc(L.la)}</small>`:''}</span></button>`).join('')
     +`<div class="note">La pastille est placée au point exact du modèle Z-Anatomy. Le halo coloré autour indique seulement la zone voisine : son étendue est indicative.</div>`}
   else if(bone&&!lm&&!p.ins)h+=`<div class="note">Les reliefs ne sont pas détaillés pour cet os dans le modèle. Os détaillés : fémur, tibia, fibula, os coxal, humérus, radius, ulna, scapula, sacrum, sphénoïde, occipital, frontal, atlas, axis, vertèbres types (C4, T8, L3), 6ᵉ côte, sternum.</div>`;
   if(INS.owner===p){const o=INS.parts.filter(q=>q.ins&&q.ins.type==='o'),e=INS.parts.filter(q=>q.ins&&q.ins.type==='e');
-    const row=q=>`<button class="lm" data-ins="${q.id}" style="--c:${q.ins.type==='o'?'#e0504a':'#3f86e8'}"><i></i><span>${esc(q.fr||q.en)}${q.la?`<small>${esc(q.la)}</small>`:''}</span></button>`;
+    const row=q=>`<button class="lm" data-ins="${q.id}" style="--c:${q.ins.type==='o'?'#e0504a':'#3f86e8'}"><i></i><span>${esc(q.fr||q.en)}${LA(q.la)?`<small>${esc(q.la)}</small>`:''}</span></button>`;
     const uniq=a=>{const s=new Set();return a.filter(q=>{const k=q.ins.muscle+q.ins.side;if(s.has(k))return false;s.add(k);return true})};
     if(bone)h+=`<h3>Origines (rouge) · ${uniq(o).length}</h3>${uniq(o).map(row).join('')||'<div class="note">Aucune</div>'}<h3>Terminaisons (bleu) · ${uniq(e).length}</h3>${uniq(e).map(row).join('')||'<div class="note">Aucune</div>'}`;
     else h+=`<div class="note">Surfaces d'origine en <b style="color:#e0504a">rouge</b> (${o.length}), de terminaison en <b style="color:#3f86e8">bleu</b> (${e.length}). Le muscle est estompé pour les laisser voir.</div>`}
@@ -549,13 +550,17 @@ async function fetchDesc(t){
 function descTarget(noLm){const p=S.sel;if(!p)return null;
   if(!noLm&&LM.bone===p&&LM.sel>=0){const L=LM.list[LM.sel];return{key:'lm|'+L.en,id:L.id,fr:L.fr,en:L.en,name:L.fr||L.en,lm:true}}
   const nm=CAT.names[p.name]||[];return{key:p.ins?p.ins.muscle:p.base,id:nm[2],fr:p.wiki||p.fr,en:p.ins?p.ins.muscle:p.base,name:p.fr||p.en,info:p.info}}
-function paintDesc(t,d){const el=$('#desc');if(!el)return;const head=`<h3>${t.lm?'Relief : '+esc(t.name):'Description'}</h3>`;
-  if(!d){el.innerHTML=head+'<div class="note">Description indisponible pour le moment : elle se charge depuis Internet. Elle reste ensuite enregistrée.</div>';return}
-  if(d.none){el.innerHTML=t.lm?'':head+`<div class="note">Pas de fiche descriptive pour cette structure. <a target="_blank" rel="noopener" href="https://fr.wikipedia.org/w/index.php?search=${encodeURIComponent(t.name)}">Chercher sur Wikipédia</a></div>`;return}
+function cleanText(t){const ps=t.split(/\n+/).map(x=>x.trim()).filter(Boolean),k=x=>norm(x).split(' ').slice(0,2).join(' '),out=[];
+  for(const p of ps){const w=new Set(norm(p).split(' ').filter(x=>x.length>3));if(out.some(o=>{if(k(o)===k(p))return true;const v=norm(o).split(' ').filter(x=>x.length>3);let c=0;for(const x of v)if(w.has(x))c++;return c/Math.max(1,Math.min(v.length,w.size))>.45}))continue;out.push(p)}return out.join('\n')}
+function paintDesc(t,d){const el=$('#desc');if(!el)return;
+  if(d&&!d.none){const p=S.sel,mus=p&&p.sys.id==='muscles',fi=p&&ficheOf(p),drop=new Set(['Partie de','Comprend'].concat(mus?[]:['Origine','Terminaison','Innervation']).concat(fi?['Origine','Terminaison','Innervation','Vascularisation artérielle']:[]));
+    d=Object.assign({},d,{t:cleanText(d.t||''),f:(d.f||[]).filter(x=>!drop.has(x[0]))});if(!d.t&&!d.f.length){el.innerHTML='';return}}const head=`<h3>${t.lm?'Relief : '+esc(t.name):'Description'}</h3>`;
+  if(!d){el.innerHTML='';return}
+  if(d.none){el.innerHTML='';return}
   const long=d.t.length>340;
   el.innerHTML=head+(d.t?`<div class="desc ${long?'':'open'}"><p>${esc(d.t).replace(/\n+/g,'<br>')}</p>${long?'<button class="more ghost" data-a="more">Lire la suite</button>':''}</div>`:'')
    +(d.f&&d.f.length?`<dl class="facts">${d.f.map(([a,v])=>`<dt>${esc(a)}</dt><dd>${v.map(esc).join(', ')}</dd>`).join('')}</dl>`:'')
-   +(d.own?'<div class="src">Fiche de l\'atlas : repères classiques d\'anatomie descriptive.</div>':'')+(d.own?'':`<div class="src">Source : ${d.u?`<a target="_blank" rel="noopener" href="https://${d.l}.wikipedia.org/wiki/${encodeURIComponent(d.u.replace(/ /g,'_'))}">Wikipédia${d.l==='en'?' (en anglais)':''}</a> · `:''}Wikidata — CC BY-SA</div>`)}
+   +(d.u?`<div class="src"><a target="_blank" rel="noopener" href="https://${d.l}.wikipedia.org/wiki/${encodeURIComponent(d.u.replace(/ /g,'_'))}">Wikipédia</a></div>`:'')}
 async function showDesc(noLm){
   const t=descTarget(noLm),el=$('#desc');if(!t||!el)return;const tok=++descTok,thin=d=>t.lm&&(!d||d.none||!d.t);
   if(t.info){paintDesc(t,{t:t.info,l:'fr',u:'',f:[],own:1});return}
@@ -633,7 +638,7 @@ $('#labBtn').onclick=()=>{setCfg('labels',!CFG.labels)};
 function setClip(on){
   clip.on=on;$('#clipPop').classList.toggle('on',on);$('#clipBtn').classList.toggle('on',on);
   if(on){clip.box=visibleBox();if(clip.box.isEmpty())clip.box.set(new THREE.Vector3(-1,0,-1),new THREE.Vector3(1,1.8,1));updClip()}
-  renderer.clippingPlanes=on?[clip.plane]:[];
+  renderer.clippingPlanes=on?[clip.plane]:[];SURF.uSec.value=on?1:0;
   for(const p of parts)if(!p.gen)for(const m of p.meshes){const sd=on?THREE.DoubleSide:THREE.FrontSide;if(m.material.side!==sd){m.material.side=sd;m.material.needsUpdate=true}}
   pickDirty=true;invalidate()}
 function updClip(){const a=clip.axis,k=+$('#clipPos').value/1000,v=clip.box.min[a]+(clip.box.max[a]-clip.box.min[a])*k,s=clip.flip?1:-1;
@@ -744,6 +749,7 @@ const ROWS=[['h','Affichage'],['tog','shadows','Ombres portées'],['rng','shadow
  ['rng','fov','Perspective',14,60,1],
  ['h','Navigation'],['rng','zoom','Vitesse du zoom',.3,4,.1],['rng','rotate','Vitesse de rotation',.3,2.5,.1],['tog','invertZoom','Inverser le sens du zoom'],['tog','inertia','Inertie des mouvements'],
  ['h','Reliefs osseux'],['rng','pin','Taille des pastilles',.6,1.8,.1],['seg','halo','Halos colorés',[[0,'Aucun'],[1,'Normal'],[1.6,'Large']]],['tog','labels','Étiquettes autour de l\'os'],
+ ['h','Noms'],['tog','latin','Noms latins'],['tog','english','Noms anglais'],
  ['h','Divers'],['rng','ghost','Opacité des structures estompées',.02,.35,.01],['tog','tips','Nom au survol de la souris']];
 function applyCfg(k){
   renderer.toneMappingExposure=CFG.exposure;
@@ -755,6 +761,7 @@ function applyCfg(k){
   SURF.uDetail.value=[0,.7,1.5][CFG.detail]||0;
   if(k==='detail'||k==='shadows'||k==='*')for(const p of parts)for(const m of p.meshes)m.material.needsUpdate=true;
   if(k==='ghost'||k==='*')for(const p of parts)if(p.ghost)apply(p);
+  if(k==='latin'||k==='english'){card();if($('#pane-quiz').classList.contains('on'))quizPane()}
   S.labels=CFG.labels;$('#labBtn').classList.toggle('on',CFG.labels);LMU.uLmK.value=CFG.halo;invalidate()}
 function setCfg(k,v){CFG[k]=v;LS.set('cfg',CFG);applyCfg(k);if($('#settings').classList.contains('on'))buildSettings()}
 function buildSettings(){
@@ -827,14 +834,14 @@ function quizAsk(){
     const t=it.parts[Math.random()*it.parts.length|0];it.target=t;const o=S.sel;S.sel=t;if(o)apply(o);apply(t);pbox(t);flyTo(t.center,Math.max(t.radius*2.4,.11));
     const near=Q.pool.filter(e=>e!==it&&e.fr!==it.fr).map(e=>{pbox(e.parts[0]);return{e,d:Math.min(...e.parts.map(p=>(pbox(p),p.center.distanceTo(t.center))))}}).sort((a,b)=>a.d-b.d).slice(0,8).map(x=>x.e);
     opts=shuffle([it,...shuffle(near).slice(0,3)]);q='Quelle est la structure en surbrillance ?'}
-  else if(Q.mode==='find'){const o=S.sel;S.sel=null;if(o)apply(o);q=`Clique sur : <em>${esc(it.fr)}</em>`;sub=it.la?`<span class="la">${esc(it.la)}</span>`:''}
+  else if(Q.mode==='find'){const o=S.sel;S.sel=null;if(o)apply(o);q=`Clique sur : <em>${esc(it.fr)}</em>`;sub=LA(it.la)?`<span class="la">${esc(it.la)}</span>`:''}
   else{
     const b=it.bone;if(LM.bone!==b){closeLm();for(const p of SYSID.squelette.parts){p.hidden=p!==b;apply(p)}openLm(b,true)}
     if(Q.mode==='lmname'){LM.sel=it.idx;paintLm();const L=LM.list[it.idx];flyTo(L.s,Math.max(b.radius*.6,.04),L.n);
       const seen=new Set([it.fr]);const others=shuffle(Q.pool.filter(e=>e.bone===b&&!seen.has(e.fr)&&seen.add(e.fr))).slice(0,3);
       opts=shuffle([it,...others]);q='Quel est le relief désigné ?';sub=esc(title(b))+(b.side?' · '+sideFr(b):'')}
     else{LM.sel=-1;paintLm();if(Q.lastBone!==b){pbox(b);flyTo(b.center,b.radius*1.15,new THREE.Vector3(0,0,1))}
-      q=`Clique sur : <em>${esc(it.fr)}</em>`;sub=esc(title(b))+(it.la?` · <span class="la">${esc(it.la)}</span>`:'')+' — tourne l\'os si la pastille est derrière'}
+      q=`Clique sur : <em>${esc(it.fr)}</em>`;sub=esc(title(b))+(LA(it.la)?` · <span class="la">${esc(it.la)}</span>`:'')+' — tourne l\'os si la pastille est derrière'}
     Q.lastBone=b}
   $('#qz').innerHTML=qHead()+`<div id="qzQ">${q}</div><div id="qzSub">${sub}</div>`+(opts?`<div id="qzOpts">${opts.map((o,i)=>`<button data-k="${esc(o.key)}"><kbd style="margin:0">${i+1}</kbd><span>${esc(o.lab||o.fr)}</span></button>`).join('')}</div>`:'')
    +`<div id="qzFoot"><span class="mut" id="qzMsg"></span><span class="sp"></span><button id="qzSkip">Je ne sais pas</button><button id="qzNext" class="on" style="display:none">Suivant<kbd>↵</kbd></button></div>`;
@@ -862,7 +869,7 @@ function quizEnd(){
   parts.forEach(p=>{if(p.flash){p.flash=0;apply(p)}});
   $('#qz').innerHTML=`<div id="qzTop"><span>Résultat</span><span style="flex:1"></span><span>${Math.floor(sec/60)} min ${sec%60} s</span></div>
    <div class="score" style="color:${pc>=80?'var(--ok)':pc>=50?'var(--gold)':'var(--ko)'}">${pc} %</div><div class="mut">${Q.ok} bonnes réponses sur ${n}</div>
-   ${errs.length?`<h3>À revoir</h3><div class="errs scroll">${errs.map(e=>`<div>${esc(e.fr)}${e.bone?` <span class="mut">· ${esc(title(e.bone))}</span>`:''}${e.la?` <span class="la mut">· ${esc(e.la)}</span>`:''}</div>`).join('')}</div>`:'<p>Sans faute.</p>'}
+   ${errs.length?`<h3>À revoir</h3><div class="errs scroll">${errs.map(e=>`<div>${esc(e.fr)}${e.bone?` <span class="mut">· ${esc(title(e.bone))}</span>`:''}${LA(e.la)?` <span class="la mut">· ${esc(e.la)}</span>`:''}</div>`).join('')}</div>`:'<p>Sans faute.</p>'}
    <div id="qzFoot">${errs.length?'<button id="qzErr" class="on">Revoir les erreurs</button>':''}<button id="qzAgain">Nouvelle série</button><span class="sp"></span><button id="qzQuit">Quitter</button></div>`;
   $('#qzQuit').onclick=quizQuit;$('#qzAgain').onclick=()=>quizStart();if(errs.length)$('#qzErr').onclick=()=>quizStart(errs)}
 function quizQuit(){
