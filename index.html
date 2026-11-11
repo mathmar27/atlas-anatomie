@@ -59,7 +59,7 @@ button.on kbd{color:inherit;border-color:currentColor;opacity:.7}
 .tabs button.on{background:var(--panel3);color:var(--tx)}
 .pane{display:none;flex:1;min-height:0;padding:10px 12px 12px}.pane.on{display:block}
 #pane-explore.on{display:flex;flex-direction:column}#sysBox{flex:none}#tree{flex:1;min-height:0}
-#sysList{display:grid;grid-template-columns:1fr 1fr;gap:1px 4px}#optList{margin:6px 0 0}#optList button{font-size:12px;padding:4px 6px}
+#sysList{display:grid;grid-template-columns:1fr 1fr;gap:1px 4px}#optList{margin:6px 0 0;flex-wrap:wrap}#optList button{font-size:12px;padding:4px 6px}
 .hrow{display:flex;align-items:center;justify-content:space-between}.hrow .seg{flex:none;text-transform:none;letter-spacing:0}.hrow .seg button{font-size:11.5px;padding:2px 9px;min-height:0;color:var(--tx)}.hrow .seg button.on{color:var(--accInk)}
 .vgrid{display:grid;grid-template-columns:1fr 1fr;gap:5px}.vgrid button{text-align:left;padding:8px 10px;font-size:12.5px}
 #exPop label{display:flex;align-items:center;gap:8px;font-size:12.5px;color:var(--mut);white-space:nowrap}#exHint{flex-basis:100%;text-align:center;font-size:11.5px}
@@ -184,7 +184,7 @@ select option{color:#111}
  #left{z-index:12;top:0;left:0;bottom:0;border-radius:0 16px 16px 0}#menuBtn{z-index:11}
 #left{width:min(316px,calc(100vw - 24px))}#card{top:auto;bottom:66px;left:12px;right:12px;width:auto;max-height:40vh}#bar{overflow:auto}#qzOpts{grid-template-columns:1fr}}
 @media (max-width:1500px){#bar kbd{display:none}#bar button{padding:7px 8px}}
-@media (min-width:821px) and (max-width:1250px){#bar{flex-wrap:wrap;justify-content:center;max-width:min(470px,calc(100vw - var(--L) - 24px))}#bar .sep{display:none}#card{max-height:calc(100vh - 176px)}#clipPop,#exPop{bottom:106px}}
+@media (min-width:821px) and (max-width:900px){#bar{flex-wrap:wrap;justify-content:center;max-width:min(470px,calc(100vw - var(--L) - 24px))}#bar .sep{display:none}#card{max-height:calc(100vh - 176px)}#clipPop,#exPop{bottom:106px}}
 @media (prefers-reduced-motion:reduce){*{transition:none!important}}
 </style>
 </head>
@@ -204,7 +204,7 @@ select option{color:#111}
   <div class="tabs"><button data-tab="explore" class="on">Explorer</button><button data-tab="views">Vues</button><button data-tab="quiz">Quiz</button></div>
   <div id="pane-explore" class="pane on">
     <div id="sysBox"><h3 class="hrow">Systèmes<span class="seg" id="sexSeg"><button data-sex="m">Homme</button><button data-sex="f">Femme</button></span></h3><div id="sysList"></div>
-    <div class="seg" id="optList"><button data-opt="Fascia" title="Afficher aussi les fascias">+ Fascias</button><button data-opt="Bursa" title="Afficher aussi les bourses synoviales">+ Bourses</button></div></div>
+    <div class="seg" id="optList"><button data-opt="Fascia" title="Afficher aussi les fascias">+ Fascias</button><button data-opt="Bursa" title="Afficher aussi les bourses synoviales">+ Bourses</button><button data-opt="White matter" title="Afficher aussi les structures profondes de l'encéphale (substance blanche, commissures, hypothalamus…)">+ Encéphale profond</button></div></div>
     <h3>Structures</h3><div id="tree" class="scroll"></div>
   </div>
   <div id="pane-views" class="pane scroll"></div>
@@ -222,15 +222,11 @@ select option{color:#111}
   <button id="clipFlip" title="Garder l'autre côté">⇄</button><button id="clipOff">Fermer</button>
 </div>
 <div id="bar" class="panel">
-  <button data-v="ant" title="Vue antérieure">Face</button><button data-v="post" title="Vue postérieure">Dos</button>
-  <button data-v="d" title="Profil droit">Droite</button><button data-v="g" title="Profil gauche">Gauche</button><button data-v="sup" title="Vue supérieure">Dessus</button>
-  <span class="sep"></span>
   <button id="undo" title="Annuler la dernière action">↶ Annuler<kbd>Z</kbd></button>
   <button id="showAll" title="Tout réafficher">Tout afficher<kbd>A</kbd></button>
   <span class="sep"></span>
   <button id="clipBtn">Coupe</button><button id="labBtn" class="on" title="Étiquettes des reliefs">Étiquettes<kbd>L</kbd></button>
   <button id="exBtn" title="Vue éclatée : écarter les structures (E)">Éclater</button><button id="disBtn" title="Dissection : chaque clic retire une structure (D)">Dissection</button>
-  <span class="sep"></span><button id="quizBtn" title="Ouvrir les quiz">Quiz</button>
 </div>
 <div id="exPop" class="panel">
   <label>Écartement <input id="exPos" type="range" min="0" max="100" value="0"></label>
@@ -250,6 +246,7 @@ select option{color:#111}
 <tr class="kb"><td><kbd>R</kbd> <kbd>L</kbd></td><td>Reliefs osseux · étiquettes</td></tr>
 <tr class="kb"><td><kbd>←</kbd> <kbd>→</kbd></td><td>Structure (ou relief) précédente / suivante</td></tr>
 <tr class="kb"><td><kbd>S</kbd></td><td>Ajouter aux favoris</td></tr>
+<tr class="kb"><td><kbd>1</kbd>–<kbd>5</kbd></td><td>Vue de face · de dos · profil droit · profil gauche · de dessus</td></tr>
 <tr class="kb"><td><kbd>Z</kbd> <kbd>A</kbd></td><td>Annuler · tout réafficher</td></tr>
 <tr class="kb"><td><kbd>Échap</kbd></td><td>Fermer / désélectionner</td></tr>
 <tr class="kb"><td><kbd>1</kbd>–<kbd>4</kbd> <kbd>↵</kbd></td><td>Quiz : répondre · question suivante</td></tr>
@@ -263,6 +260,6 @@ select option{color:#111}
 window.addEventListener('error',e=>{const m=document.getElementById('splashMsg');if(m&&document.getElementById('splash').style.opacity!=='0'){m.className='err';
   m.textContent=location.protocol==='file:'?"Ouvre l'appli avec « Lancer l'atlas.command » (double-clic), pas en ouvrant index.html directement.":'Erreur de chargement : '+(e.message||'réseau')}} ,true);
 </script>
-<script type="module" src="app.js?v=28"></script>
+<script type="module" src="app.js?v=31"></script>
 </body>
 </html>

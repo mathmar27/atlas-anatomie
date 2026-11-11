@@ -40,10 +40,10 @@ function warpMesh(o,name){
 const SYS=[
  {id:'squelette',label:'Squelette',files:['squelette.glb','sesamoides_main.glb'],color:0xe6d9bd,rough:.66},
  {id:'articulations',label:'Articulations et ligaments',files:['articulations.glb'],color:0xa9c2ab,rough:.6},
- {id:'muscles',label:'Muscles',files:['muscles.glb'],color:0xa9463e,rough:.46},
+ {id:'muscles',label:'Muscles',files:['muscles_seuls.glb'],extra:{Fascia:'fascias.glb',Bursa:'bourses.glb'},color:0xa9463e,rough:.46},
  {id:'vaisseaux',label:'Cardiovasculaire',files:['vaisseaux.glb'],color:0xd9534f,rough:.36},
- {id:'nerfs',label:'Nerveux et organes des sens',files:['nerfs.glb'],color:0xead25c,rough:.5},
- {id:'visceres',label:'Viscères',files:['visceres.glb'],color:0xc98a7a,rough:.38},
+ {id:'nerfs',label:'Nerveux et organes des sens',files:['nerfs_seuls.glb'],extra:{Fascia:'nerfs_fascias.glb','White matter':'substance_blanche.glb'},color:0xead25c,rough:.5},
+ {id:'visceres',label:'Viscères',files:['visceres_seuls.glb'],extra:{Fascia:'visceres_fascias.glb'},color:0xc98a7a,rough:.38},
  {id:'lymphatique',label:'Lymphatique',files:['lymphatique.glb','vaisseaux_lymphatiques.glb'],color:0x9ad68f,rough:.5},
  {id:'feminin',label:'Appareil génital féminin',files:['feminin.glb'],color:0xd98a8a,rough:.5},
  {id:'regions',label:'Peau et régions',files:['regions.glb'],color:0xd8a98b,rough:.6},
@@ -129,10 +129,12 @@ function loop(t){
 let CAT={names:{},landmarks:{}};
 const parts=[];const S={sel:null,hov:null,labels:CFG.labels};
 let pickDirty=true,pickables=[];
-const OPT=LS.get('opt',{Fascia:false,Bursa:false});
+const OPT=Object.assign({Fascia:false,Bursa:false,'White matter':false},LS.get('opt',{}));const LOADED=new Set();
 const defHidden=p=>!!p.ins||!!p.defOff||(p.mat in OPT&&!OPT[p.mat]);
 function splitName(n){n=n.replace(/\.\d{3}$/,'').trim();const m=n.match(/^(.*)\.([lr])$/);return m?[m[1].trim(),m[2]]:[n.replace(/\.$/,''),'']}
-function tint(mn,orig,s,name){
+const ABDO=/abdominal oblique|^Rectus abdominis|^Transversus abdominis|^Pyramidalis/;
+function tint(mn,orig,s,name){const c=tint0(mn,orig,s,name);if(s.id==='muscles'&&ABDO.test(name))c.offsetHSL(0,-.14,.01);return c}
+function tint0(mn,orig,s,name){
   if(mn==='Black')return new THREE.Color(/lash|brow/i.test(name)?0x1d130d:0x33200f);
   if(s.id==='insertions')return new THREE.Color(/^(End|Muscular ending)/i.test(mn)?0x3f86e8:0xe0504a);
   if(/^Bone|^Os-/.test(mn))return new THREE.Color(0xe6d9bd);
@@ -236,7 +238,7 @@ function ingest(gltf,s){
       p={id:parts.length,name,base,side,sys:s,mat:mn.replace(/-\d+$/,''),meshes:[],fr:nm?nm[0]:'',la:nm?nm[1]:'',en:base,hidden:false,ghost:false,lmOn:false,flash:0,box:null};
       if(s.id==='insertions'){const m=name.match(/^(.*)\.([oe])(\d*)([lr])?$/);if(m){p.ins={muscle:m[1].replace(/^\(|\)$/g,''),type:m[2],side:m[4]||''};p.en=p.ins.muscle;p.side=p.ins.side}}
       p.hidden=defHidden(p);
-      owners.set(owner,p);parts.push(p);s.parts.push(p)}
+      owners.set(owner,p);parts.push(p);s.parts.push(p);LOADED.add(name)}
     const base=tint(mn,o.material.color||new THREE.Color(1,1,1),s,p.base);
     const mat=new THREE.MeshStandardMaterial({color:base.clone(),roughness:s.rough,metalness:0,envMapIntensity:.7,side:o.material.side});
     mat.userData.kind=kindOf(mn,s);mat.onBeforeCompile=surfCompile;mat.customProgramCacheKey=surfKey;o.castShadow=o.receiveShadow=true;
@@ -268,11 +270,12 @@ function loadSys(s){
   if(s.promise)return s.promise;
   s.state='loading';loading++;sysRow(s);
   s.promise=(async()=>{
-    const prog=s.files.map(()=>0);
+    s.xl=s.xl||{};const files=s.files.concat(Object.keys(s.extra||{}).filter(k=>OPT[k]).map(k=>(s.xl[k]=1,s.extra[k])));
+    const prog=files.map(()=>0);
     try{
-      const gl=await Promise.all(s.files.map((f,i)=>new Promise((res,rej)=>gltfL.load(EXPORT+encodeURI(f),res,e=>{if(e.total){prog[i]=e.loaded/e.total;s.prog=prog.reduce((a,b)=>a+b,0)/prog.length;sysRow(s);setLoader(s.prog*.95)}},rej))));
+      const gl=await Promise.all(files.map((f,i)=>new Promise((res,rej)=>gltfL.load(EXPORT+encodeURI(f),res,e=>{if(e.total){prog[i]=e.loaded/e.total;s.prog=prog.reduce((a,b)=>a+b,0)/prog.length;sysRow(s);setLoader(s.prog*.95)}},rej))));
       gl.forEach(g=>ingest(g,s));if(s.id==='feminin'&&SEX==='f')genFemale(s);s.state='ready';s.parts.forEach(apply);indexSys(s);
-    }catch(e){s.state='';s.promise=null;toast('Impossible de charger « '+s.label+' » ('+s.files.join(', ')+')');throw e}
+    }catch(e){s.state='';s.promise=null;toast('Impossible de charger « '+s.label+' »');throw e}
     finally{loading--;setLoader(1);sysRow(s)}
   })();
   return s.promise}
@@ -581,11 +584,12 @@ $('#tree').addEventListener('mouseover',e=>{const b=e.target.closest('.it[data-i
 let resCur=0,resList=[];
 function doSearch(){
   const q=norm($('#search').value),box=$('#results');if(q.length<2){box.classList.remove('on');return}
-  const ws=q.split(' ');resList=IDX.concat(IDXC.filter(e=>e.s.state!=='ready')).filter(e=>ws.every(w=>e.t.includes(w))).sort((a,b)=>(a.t.startsWith(q)?0:1)-(b.t.startsWith(q)?0:1)||(a.lm!==undefined?1:0)-(b.lm!==undefined?1:0)||a.t.length-b.t.length).slice(0,40);
+  const ws=q.split(' ');resList=IDX.concat(IDXC.filter(e=>!LOADED.has(e.name))).filter(e=>ws.every(w=>e.t.includes(w))).sort((a,b)=>(a.t.startsWith(q)?0:1)-(b.t.startsWith(q)?0:1)||(a.lm!==undefined?1:0)-(b.lm!==undefined?1:0)||a.t.length-b.t.length).slice(0,40);
   resCur=0;box.innerHTML=resList.map((e,i)=>`<button class="res ${i?'':'cur'}" data-i="${i}"><span>${esc(e.name?e.fr:e.lm!==undefined?(e.L.fr||e.L.en):title(e.p))}</span><small>${e.name?esc(e.s.label)+(e.side?' · '+(e.side==='r'?'D':'G'):''):e.lm!==undefined?'relief · '+esc(e.p.fr||e.p.en):esc(e.p.sys.label)+(e.p.side?' · '+(e.p.side==='r'?'D':'G'):'')}</small></button>`).join('')
     ||'<div class="note">Aucun résultat.</div>';box.classList.add('on')}
 function goResult(i){const e=resList[i];if(!e)return;$('#results').classList.remove('on');$('#search').blur();if(Q.on)return;
-  if(e.name){setSys(e.s,true).then(()=>{const p=parts.find(x=>x.name===e.name);if(!p){toast('Cette structure n\'a pas de modèle 3D');return}if(p.hidden){p.hidden=false;apply(p)}select(p,true)});return}
+  if(e.name){setSys(e.s,true).then(async()=>{let p=parts.find(x=>x.name===e.name);if(!p&&e.s.extra)for(const k in e.s.extra){if(OPT[k])continue;await enableOpt(k);p=parts.find(x=>x.name===e.name);if(p)break;disableOpt(k)}
+    if(!p){toast('Cette structure n\'a pas de modèle 3D');return}if(p.hidden){p.hidden=false;apply(p)}select(p,true)});return}
   const p=e.p;if(!p.sys.on){p.sys.on=true;p.sys.parts.forEach(apply);sysRow(p.sys);buildTree()}
   if(p.hidden){pushUndo();p.hidden=false;apply(p)}
   select(p);if(e.lm!==undefined){if(LM.bone!==p)openLm(p);card();selectLm(e.lm,true)}else focusSel()}
@@ -596,7 +600,7 @@ $('#results').addEventListener('click',e=>{const b=e.target.closest('.res');if(b
 
 // ------------------------------------------------------------------ barre d'outils
 const DIRS={ant:[0,0,1],post:[0,0,-1],d:[-1,0,0],g:[1,0,0],sup:[0,1,.0001]};
-$$('#bar [data-v]').forEach(b=>b.onclick=()=>{const d=new THREE.Vector3(...DIRS[b.dataset.v]);if(S.sel&&!S.sel.hidden){pbox(S.sel);const iso=parts.filter(q=>q.sys.on&&!q.hidden&&!q.ghost).length<4;if(iso){flyTo(S.sel.center,S.sel.radius*1.2,d);return}}fitAll(d)});
+function viewDir(v){const d=new THREE.Vector3(...DIRS[v]);if(S.sel&&!S.sel.hidden){pbox(S.sel);const iso=parts.filter(q=>q.sys.on&&!q.hidden&&!q.ghost).length<4;if(iso){flyTo(S.sel.center,S.sel.radius*1.2,d);return}}fitAll(d)}
 $('#undo').onclick=undo;$('#showAll').onclick=showAll;
 $('#labBtn').onclick=()=>{setCfg('labels',!CFG.labels)};
 function setClip(on){
@@ -625,6 +629,7 @@ addEventListener('keydown',e=>{
   else if(k==='?'){toggleHelp()}
   else if(k==='escape'){if($('#help').classList.contains('on'))toggleHelp(false);else if($('#settings').classList.contains('on'))$('#setClose').click();else if(EX.on||EX.arm)setExplode(false);else if(DIS)setDis(false);else if(clip.on)setClip(false);else if(LM.sel>=0)selectLm(-1);else select(null)}
   else if(k==='e'){if(EX.on||EX.arm)setExplode(false);else if(S.sel&&!S.sel.ins)explodeAround();else setExplode(true)}else if(k==='d')setDis(!DIS)
+  else if(/^[1-5]$/.test(k)&&!e.altKey)viewDir(['ant','post','d','g','sup'][+k-1]);
   else if(k==='z')undo();else if(k==='a')showAll();else if(k==='l')$('#labBtn').click();
   else if(k==='arrowleft'||k==='arrowright'){if(S.sel){e.preventDefault();step(k==='arrowleft'?-1:1)}}
   else if(S.sel){if(k==='i')isolate(S.sel);else if(k==='h')hideSel();else if(k==='g')ghostOthers();else if(k==='f')focusSel();else if(k==='r')toggleLm();else if(k==='s')toggleFav()}});
@@ -695,7 +700,7 @@ $('#exBtn').onclick=()=>{if(EX.on||EX.arm)setExplode(false);else if(S.sel&&!S.se
 $('#exPos').oninput=e=>{EX.t=+e.target.value/100;invalidate()};
 $('#exRad').oninput=e=>{EX.R=+e.target.value/100;if(EX.on){exCollect(true);exUI()}};
 $('#disBtn').onclick=()=>{if(!Q.on)setDis(!DIS)};
-$('#quizBtn').onclick=()=>{leftOpen(true);$('.tabs [data-tab=quiz]').click()};
+
 // ------------------------------------------------------------------ panneau de réglages
 const ROWS=[['h','Affichage'],['tog','shadows','Ombres portées'],['rng','shadowStrength','Intensité des ombres',.2,.95,.05],['tog','ground','Ombre au sol'],
  ['seg','detail','Relief des surfaces',[[0,'Aucun'],[1,'Léger'],[2,'Marqué']]],['rng','exposure','Luminosité',.6,1.7,.05],['seg','quality','Netteté',[['eco','Éco'],['auto','Auto'],['max','Max']]],
@@ -894,7 +899,13 @@ function genFemale(s){
 // ------------------------------------------------------------------ démarrage
 SYS.forEach(sysRow);
 $$('#optList button').forEach(b=>{const k=b.dataset.opt;b.classList.toggle('on',!!OPT[k]);b.onclick=()=>{if(Q.on)return;OPT[k]=!OPT[k];LS.set('opt',OPT);b.classList.toggle('on',OPT[k]);
-  for(const p of parts)if(p.mat===k){p.hidden=!OPT[k];apply(p)}buildTree()}});
+  loadExtra(k).then(()=>{for(const p of parts)if(p.mat===k){p.hidden=!OPT[k];apply(p)}buildTree()})}});
+async function loadExtra(k){for(const s of SYS){if(!s.extra||!s.extra[k]||s.state!=='ready'||(s.xl&&s.xl[k])||!OPT[k])continue;s.xl=s.xl||{};s.xl[k]=1;
+  loading++;setLoader(.3);try{const g=await new Promise((res,rej)=>gltfL.load(EXPORT+s.extra[k],res,null,rej));const n0=s.parts.length;ingest(g,s);const nw=s.parts.slice(n0);
+    nw.forEach(apply);for(const p of nw)IDX.push({t:norm(p.fr+' '+p.la+' '+p.en),p});s.parts.sort((a,b)=>title(a).localeCompare(title(b),'fr')||a.side.localeCompare(b.side));sysRow(s)}
+  catch{s.xl[k]=0;toast('Impossible de charger '+s.extra[k])}finally{loading--;setLoader(1)}}}
+function disableOpt(k){OPT[k]=false;LS.set('opt',OPT);const b=$(`#optList [data-opt="${k}"]`);if(b)b.classList.remove('on');for(const p of parts)if(p.mat===k){p.hidden=true;apply(p)}}
+async function enableOpt(k){if(OPT[k])return;OPT[k]=true;LS.set('opt',OPT);const b=$(`#optList [data-opt="${k}"]`);if(b)b.classList.add('on');await loadExtra(k);for(const p of parts)if(p.mat===k){p.hidden=false;apply(p)}}
 if(innerWidth<900)leftOpen(false);
 (async()=>{
   try{CAT=await (await fetch('data/catalog.json')).json()}catch(e){$('#splashMsg').className='err';$('#splashMsg').textContent="Données introuvables (data/catalog.json). Lance l'appli avec « Lancer l'atlas.command ».";return}
