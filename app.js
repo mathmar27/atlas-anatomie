@@ -147,7 +147,23 @@ function tint(mn,orig,s,name){
 const SURF={uDetail:{value:0}};
 function kindOf(mn,s){if(mn==='Black')return 6;if(/^Bone|^Os-|Teeth|Suture|Dentine/.test(mn))return 1;if(/Tendon|Ligament|Fascia|capsule|Cartilage/i.test(mn))return 5;if(s.id==='muscles'||FUNC[mn])return 2;
   return{vaisseaux:3,nerfs:3,lymphatique:3,regions:4,squelette:1,insertions:3}[s.id]||0}
-function surfKey(){return'surf'+(this.userData.kind|0)+(this.userData.halo?'h':'')+(CFG.detail>0?'d':'')}
+function surfKey(){return'surf'+(this.userData.kind|0)+(this.userData.halo?'h':'')+(CFG.detail>0?'d':'')+(this.userData.apo?'a':'')}
+// Oblique externe : maillage Z-Anatomy sculpté (≈ 50× plus dense que les autres muscles) qui inclut son aponévrose
+// (feuillet antérieur de la gaine des droits). On lisse le grain de sculpture et on teinte l'aponévrose en blanc nacré.
+function taubin(g,it){const P=g.attributes.position.array,n=P.length/3,I=g.index.array,deg=new Uint32Array(n+1);
+  for(let t=0;t<I.length;t+=3){deg[I[t]]+=2;deg[I[t+1]]+=2;deg[I[t+2]]+=2}
+  const off=new Uint32Array(n+1);for(let i=0;i<n;i++)off[i+1]=off[i]+deg[i];const adj=new Uint32Array(off[n]),fill=off.slice(0,n);
+  const add=(a,b)=>{adj[fill[a]++]=b};for(let t=0;t<I.length;t+=3){const a=I[t],b=I[t+1],c=I[t+2];add(a,b);add(a,c);add(b,a);add(b,c);add(c,a);add(c,b)}
+  const Q=new Float32Array(P.length);
+  for(let k=0;k<it*2;k++){const f=k%2?-.53:.5;
+    for(let i=0;i<n;i++){const o0=off[i],o1=off[i+1];if(o1===o0){Q[i*3]=P[i*3];Q[i*3+1]=P[i*3+1];Q[i*3+2]=P[i*3+2];continue}let x=0,y=0,z=0;
+      for(let j=o0;j<o1;j++){const q=adj[j]*3;x+=P[q];y+=P[q+1];z+=P[q+2]}const w=1/(o1-o0);
+      Q[i*3]=P[i*3]+f*(x*w-P[i*3]);Q[i*3+1]=P[i*3+1]+f*(y*w-P[i*3+1]);Q[i*3+2]=P[i*3+2]+f*(z*w-P[i*3+2])}
+    P.set(Q)}
+  g.attributes.position.needsUpdate=true;g.computeVertexNormals();g.computeBoundingBox();g.computeBoundingSphere()}
+function fixOblique(o,mat){const g=o.geometry;if(g.index&&g.attributes.position.count>40000)taubin(g,5);const P=g.attributes.position,a=new Float32Array(P.count),v=new THREE.Vector3();
+  for(let i=0;i<P.count;i++){v.fromBufferAttribute(P,i).applyMatrix4(o.matrixWorld);const ax=Math.abs(v.x),b=.087+.034*(1-sm(.935,1.0,v.y));a[i]=1-sm(b-.009,b+.009,ax)}
+  g.setAttribute('aApo',new THREE.BufferAttribute(a,1));mat.userData.apo=true;mat.userData.apoU={value:1}}
 const GLSL_NOISE=`
 float h13(vec3 p){p=fract(p*.1031);p+=dot(p,p.zyx+31.32);return fract((p.x+p.y)*p.z);}
 float vn(vec3 p){vec3 i=floor(p),f=fract(p);f=f*f*(3.-2.*f);
@@ -194,6 +210,8 @@ float surfH(vec3 p,float px){float h=0.;
 `;
 function surfCompile(sh){
   const u=this.userData,det=CFG.detail>0;Object.assign(sh.uniforms,LMU,SURF);
+  if(u.apo){sh.uniforms.uApoK=u.apoU;sh.vertexShader=sh.vertexShader.replace('#include <common>','#include <common>\nattribute float aApo;varying float vApo;').replace('#include <begin_vertex>','#include <begin_vertex>\nvApo=aApo;');
+    sh.fragmentShader=sh.fragmentShader.replace('#include <common>','#include <common>\nvarying float vApo;uniform float uApoK;').replace('#include <color_fragment>','#include <color_fragment>\ndiffuseColor.rgb=mix(diffuseColor.rgb,vec3(.74,.67,.56),vApo*uApoK);')}
   sh.vertexShader=sh.vertexShader.replace('#include <common>','#include <common>\nvarying vec3 vHP;varying vec3 vHN;')
     .replace('#include <begin_vertex>','#include <begin_vertex>\nvHP=(modelMatrix*vec4(transformed,1.)).xyz;vHN=normalize(mat3(modelMatrix)*objectNormal);');
   sh.fragmentShader=sh.fragmentShader.replace('#include <common>','#include <common>\nvarying vec3 vHP;varying vec3 vHN;uniform float uDetail;float gH=0.;\n#define KIND '+(u.kind|0)+'\n'+(det?'#define SURF_DETAIL\n':'')+(u.halo?'#define SURF_HALO\n':'')
@@ -241,6 +259,7 @@ function ingest(gltf,s){
     const mat=new THREE.MeshStandardMaterial({color:base.clone(),roughness:s.rough,metalness:0,envMapIntensity:.7,side:o.material.side});
     mat.userData.kind=kindOf(mn,s);mat.onBeforeCompile=surfCompile;mat.customProgramCacheKey=surfKey;o.castShadow=o.receiveShadow=true;
     if(s.id==='insertions'){mat.polygonOffset=true;mat.polygonOffsetFactor=-3;mat.polygonOffsetUnits=-3}
+    if(/^(External|Internal) abdominal oblique muscle|^Transversus abdominis muscle/.test(name))fixOblique(o,mat);
     if(SEX==='f')warpMesh(o,name);
     mat.userData.base=base;o.material=mat;o.userData.part=p;p.meshes.push(o);o.matrixAutoUpdate=false});
   root.traverse(o=>{o.matrixAutoUpdate=false});world.add(root)}
@@ -253,6 +272,7 @@ function apply(p){
   for(const m of p.meshes){m.visible=vis;const mt=m.material;
     if(mt.transparent!==p.ghost){mt.transparent=p.ghost;mt.depthWrite=!p.ghost;mt.needsUpdate=true}
     mt.opacity=p.ghost?CFG.ghost:1;m.renderOrder=p.ghost?5:0;m.castShadow=!p.ghost;
+    if(mt.userData.apoU)mt.userData.apoU.value=(p.flash||sel)?.25:1;
     if(p.flash){mt.color.copy(p.flash>0?GREEN:RED);mt.emissive.copy(mt.color).multiplyScalar(.25)}
     else if(sel){mt.color.copy(mt.userData.base).lerp(GOLD,.82);mt.emissive.setRGB(.26,.13,.0)}
     else{mt.color.copy(mt.userData.base);if(hov)mt.emissive.setRGB(.06,.085,.08);else mt.emissive.setRGB(0,0,0)}}
