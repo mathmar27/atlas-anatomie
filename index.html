@@ -207,6 +207,7 @@ select option{color:#111}
 .ncard{display:flex;flex-direction:column;align-items:center;gap:6px;padding:10px 8px 10px;border-radius:14px;background:var(--panel2);border:1px solid transparent;text-align:center;min-width:0}
 .ncard:hover{border-color:var(--acc);background:var(--panel3)}.ncard img{width:132px;height:132px;border-radius:12px;object-fit:contain}.ncard span{font-size:13px;font-weight:600;line-height:1.25}.ncard small{display:block;font-weight:400;font-size:11.5px;color:var(--mut)}
 .pill{display:block;width:64px;height:9px;border-radius:9px;border:1.5px solid var(--mut);overflow:hidden;flex:none}.pill i{display:block;height:100%}
+.ncard img.noth{display:none}.ncard img.ld{background:linear-gradient(100deg,var(--panel2) 30%,var(--panel3) 50%,var(--panel2) 70%);background-size:200% 100%;animation:sh 1.2s linear infinite}@keyframes sh{to{background-position:-200% 0}}
 .ngrid.list{grid-template-columns:1fr;gap:4px}.ngrid.list .ncard{flex-direction:row;text-align:left;padding:6px 14px 6px 8px;gap:14px}.ngrid.list .ncard img{width:48px;height:48px;border-radius:9px}.ngrid.list .ncard span{flex:1}
 #pq{left:var(--L);right:0;margin-inline:auto;width:max-content;max-width:calc(100vw - var(--L) - 24px);bottom:16px;padding:12px 18px;display:none;text-align:center;z-index:7}#pq.on{display:block}
 .pqT{font-size:17px;font-weight:650;margin-bottom:4px}.pqB{display:flex;gap:8px;justify-content:center;margin-top:10px;flex-wrap:wrap}.pqB button{padding:8px 16px}
@@ -296,6 +297,6 @@ select option{color:#111}
 window.addEventListener('error',e=>{const m=document.getElementById('splashMsg');if(m&&document.getElementById('splash').style.opacity!=='0'){m.className='err';
   m.textContent=location.protocol==='file:'?"Ouvre l'appli avec « Lancer l'atlas.command » (double-clic), pas en ouvrant index.html directement.":'Erreur de chargement : '+(e.message||'réseau')}} ,true);
 </script>
-<script type="module" src="app.js?v=54"></script>
+<script type="module" src="app.js?v=56"></script>
 </body>
 </html>
