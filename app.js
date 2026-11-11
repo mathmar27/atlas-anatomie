@@ -133,7 +133,7 @@ const OPT=Object.assign({Fascia:false,Bursa:false,'White matter':false},LS.get('
 const defHidden=p=>!!p.ins||!!p.defOff||(p.mat in OPT&&!OPT[p.mat]);
 function splitName(n){n=n.replace(/\.\d{3}$/,'').trim();const m=n.match(/^(.*)\.([lr])$/);return m?[m[1].trim(),m[2]]:[n.replace(/\.$/,''),'']}
 const ABDO=/abdominal oblique|^Rectus abdominis|^Transversus abdominis|^Pyramidalis/;
-function tint(mn,orig,s,name){const c=tint0(mn,orig,s,name);if(s.id==='muscles'&&ABDO.test(name))c.offsetHSL(0,-.14,.01);return c}
+function tint(mn,orig,s,name){const c=tint0(mn,orig,s,name);if(s.id==='muscles'&&ABDO.test(name)){c.set(0xad4b3f);const h=(hash(name)%100)/100;c.offsetHSL(0,0,(h-.5)*.02)}return c}
 function tint0(mn,orig,s,name){
   if(mn==='Black')return new THREE.Color(/lash|brow/i.test(name)?0x1d130d:0x33200f);
   if(s.id==='insertions')return new THREE.Color(/^(End|Muscular ending)/i.test(mn)?0x3f86e8:0xe0504a);
