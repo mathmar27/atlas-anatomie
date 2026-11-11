@@ -323,6 +323,7 @@ const rc=new THREE.Raycaster(),ndc=new THREE.Vector2();
 const clip={on:false,axis:'x',flip:false,plane:new THREE.Plane(new THREE.Vector3(-1,0,0),0),box:null};
 function pick(ev,pins=true){
   const r=canvas.getBoundingClientRect();ndc.set((ev.clientX-r.left)/r.width*2-1,-(ev.clientY-r.top)/r.height*2+1);rc.setFromCamera(ndc,camera);
+  if(PQ.on){const h=rc.intersectObjects(PQ.pins.filter(s=>s.visible),false);return h.length?{pq:h[0].object.userData.i}:null}
   if(pins&&LM.bone){const h=rc.intersectObjects(LM.pins.filter(s=>s.visible),false);if(h.length)return{lm:h[0].object.userData.i}}
   if(pickDirty){pickables=[];for(const p of parts)if(p.sys.on&&!p.hidden&&!p.ghost)for(const m of p.meshes)pickables.push(m);pickDirty=false}
   rc.firstHitOnly=!clip.on;
@@ -342,7 +343,7 @@ canvas.addEventListener('pointerleave',()=>{setHover(null);setLmHover(-1);hideTi
 canvas.addEventListener('dblclick',e=>{const h=pick(e,false);if(h&&h.part&&!Q.on){select(h.part);focusSel()}});
 function setHover(p){if(S.hov===p)return;const o=S.hov;S.hov=p;if(o)apply(o);if(p)apply(p)}
 function onHover(e){
-  const h=pick(e);canvas.style.cursor=h?(DIS?'crosshair':'pointer'):'';
+  const h=pick(e);canvas.style.cursor=h?(DIS?'crosshair':'pointer'):'';if(PQ.on){hideTip();return}
   if(h&&h.lm!==undefined){setHover(null);setLmHover(h.lm);if(!Q.on||Q.answered){const L=LM.list[h.lm];showTip(e,L.fr||L.en,LA(L.la))}else hideTip();return}
   setLmHover(-1);
   if(Q.on&&(Q.mode==='lmname'||Q.mode==='lmfind')){setHover(null);hideTip();return}
@@ -350,6 +351,7 @@ function onHover(e){
   if(h&&!Q.on&&CFG.tips)showTip(e,title(h.part)+(h.part.side?' · '+sideFr(h.part):''),LA(h.part.la));else hideTip()}
 function onClick(e){
   const h=pick(e);
+  if(PQ.on){pqClick(h);return}
   if(Q.on){quizClick(h);return}
   if(h&&h.lm!==undefined){selectLm(h.lm,true);return}
   if((e.shiftKey||e.metaKey||e.ctrlKey||MULTI)&&h&&h.part){toggleMulti(h.part);return}
@@ -721,7 +723,10 @@ $('#helpBtn').onclick=()=>toggleHelp();$('#helpClose').onclick=()=>toggleHelp(fa
 $$('.tabs button').forEach(b=>b.onclick=()=>{$$('.tabs button').forEach(x=>x.classList.toggle('on',x===b));$$('.pane').forEach(p=>p.classList.toggle('on',p.id==='pane-'+b.dataset.tab));if(b.dataset.tab==='quiz')quizPane()});
 addEventListener('keydown',e=>{
   if((e.target.matches&&e.target.matches('input,textarea,select'))||e.metaKey||e.ctrlKey&&e.key!=='z')return;const k=e.key.toLowerCase();
+  if(NAV.on){if(k==='escape')navBack();return}
+  if(PQ.on){if(k==='escape')pqQuit();return}
   if(Q.on){quizKey(e,k);return}
+  if(k==='n'){navOpen();return}
   if(k==='/'){e.preventDefault();leftOpen(true);$('#search').focus()}
   else if(k==='?'){toggleHelp()}
   else if(k==='escape'){if($('#help').classList.contains('on'))toggleHelp(false);else if($('#settings').classList.contains('on'))$('#setClose').click();else if(EX.on||EX.arm)setExplode(false);else if(DIS)setDis(false);else if(clip.on)setClip(false);else if(LM.sel>=0)selectLm(-1);else select(null)}
@@ -946,6 +951,82 @@ function quizKey(e,k){
   if(k==='enter'||k===' '){e.preventDefault();if(Q.done)return;if(Q.answered)quizNext();return}
   if(/^[1-4]$/.test(k)&&!Q.answered){const b=$$('#qzOpts button')[+k-1];if(b)b.click()}}
 
+// ------------------------------------------------------------------ navigateur (Atlas / Quiz) et quiz à pastilles
+const NAV={on:false,mode:'atlas',stack:[],grid:LS.get('navgrid',true),q:''},PQ={on:false,pins:[],items:[],queue:[],ok:0,ko:0,def:null},PQB=LS.get('pq',{});
+const NSYS=[['squelette','Os · système squelettique'],['articulations','Articulations · système articulaire'],['muscles','Muscles'],['vaisseaux','Cœur et vaisseaux'],['nerfs','Système nerveux'],['visceres','Viscères']];
+const NREG=[['tc','Tête et cou'],['tr','Tronc'],['ms','Membre supérieur'],['mi','Membre inférieur']];
+function regOf(p){if(p.sys.id==='squelette'){const g=boneGroup(p.en);return g==='crane'?'tc':g==='msup'?'ms':g==='minf'?'mi':/^(Atlas|Axis|Vertebra C)/.test(p.base)?'tc':'tr'}
+  pbox(p);const c=p.center,ax=Math.abs(c.x);if(c.y>1.43&&ax<.14)return'tc';if(ax>.2||(ax>.15&&c.y>.95&&c.y<1.43&&p.radius<.2))return'ms';if(c.y<.84)return'mi';return'tr'}
+const regParts=(s,r)=>s.parts.filter(p=>!p.ins&&!defHidden(p)&&regOf(p)===r);
+// vignettes : rendu hors écran de la structure, mis en cache
+const TH=new Map(),thQ=[];let thRT=null,thBusy=false;const thCam=new THREE.PerspectiveCamera(26,1,.01,20);
+function thumb(key,ps,img){if(TH.has(key)){img.src=TH.get(key);return}thQ.push([key,ps,img]);if(!thBusy){thBusy=true;setTimeout(thRun,30)}}
+function thRun(){const job=thQ.shift();if(!job){thBusy=false;return}const [key,ps,img]=job;
+  if(!TH.has(key)&&ps.length){const N=176;thRT=thRT||new THREE.WebGLRenderTarget(N,N,{colorSpace:THREE.SRGBColorSpace});const set=new Set(ps),sv=[],bx=new THREE.Box3();
+    for(const p of parts)for(const m of p.meshes){sv.push(m,m.visible,m.material.transparent,m.material.opacity);m.visible=set.has(p);if(m.visible){m.material.transparent=false;m.material.opacity=1}}
+    ps.forEach(p=>bx.union(pbox(p)));const c=bx.getCenter(new THREE.Vector3()),r=bx.getSize(new THREE.Vector3()).length()/2,d=new THREE.Vector3(.35,.12,1).normalize();
+    thCam.position.copy(c).addScaledVector(d,r/Math.sin(13*Math.PI/180)*1.02);thCam.lookAt(c);thCam.near=.01;thCam.far=30;thCam.updateProjectionMatrix();thCam.updateMatrixWorld();
+    const pv=pinG.visible,cv=capG.visible,gv=ground.visible,cl=renderer.clippingPlanes;pinG.visible=capG.visible=ground.visible=false;renderer.clippingPlanes=[];
+    for(const L of[sun,sun2]){L.position.copy(c).add(new THREE.Vector3(-.5,.72,.62).applyQuaternion(thCam.quaternion).multiplyScalar(3));L.target.position.copy(c);L.target.updateMatrixWorld();L.updateMatrixWorld()}
+    renderer.setRenderTarget(thRT);renderer.setClearColor(0,0);renderer.clear();renderer.render(scene,thCam);const px=new Uint8Array(N*N*4);renderer.readRenderTargetPixels(thRT,0,0,N,N,px);renderer.setRenderTarget(null);
+    pinG.visible=pv;capG.visible=cv;ground.visible=gv;renderer.clippingPlanes=cl;for(let i=0;i<sv.length;i+=4){sv[i].visible=sv[i+1];sv[i].material.transparent=sv[i+2];sv[i].material.opacity=sv[i+3]}
+    const cvs=document.createElement('canvas');cvs.width=cvs.height=N;const x=cvs.getContext('2d'),im=x.createImageData(N,N);for(let y=0;y<N;y++)im.data.set(px.subarray((N-1-y)*N*4,(N-y)*N*4),y*N*4);x.putImageData(im,0,0);TH.set(key,cvs.toDataURL());invalidate()}
+  if(TH.has(key)&&img.isConnected)img.src=TH.get(key);setTimeout(thRun,12)}
+// pages
+const pill=id=>{const b=PQB[id];return`<span class="pill" title="${b===undefined?'Pas encore fait':'Meilleur score : '+b+' %'}"><i style="width:${b||0}%;background:${b>=80?'var(--ok)':b>=50?'var(--gold)':'var(--ko)'}"></i></span>`};
+function navCard(c,i){return`<button class="ncard" data-i="${i}"><img alt="" data-th="${i}"><span>${esc(c.t)}${c.sub?`<small>${esc(c.sub)}</small>`:''}</span>${c.quiz?pill(c.quiz.id):''}</button>`}
+function navRender(){const pg=NAV.stack[NAV.stack.length-1],el=$('#nav');if(!pg){el.classList.remove('on');NAV.on=false;return}
+  NAV.cards=[];const q=norm(NAV.q);let h='';
+  for(const sec of pg.secs){const cs=sec.cards.filter(c=>!q||norm(c.t+' '+(c.la||'')).includes(q));if(!cs.length)continue;h+=`<h2>${esc(sec.t)}</h2><div class="ngrid ${NAV.grid?'':'list'}">${cs.map(c=>navCard(c,NAV.cards.push(c)-1)).join('')}</div>`}
+  $('#navTitle').textContent=pg.t;$('#navBody').innerHTML=h||'<div class="note">Aucun résultat.</div>';$('#navBody').scrollTop=pg.sc||0;
+  $$('#navTabs button').forEach(b=>b.classList.toggle('on',b.dataset.m===NAV.mode));$('#navGrid').textContent=NAV.grid?'☰':'▦';
+  NAV.cards.forEach((c,i)=>{const im=$(`#navBody [data-th="${i}"]`);if(c.ps&&c.ps.length)thumb(c.k,c.ps,im);else im.style.background=c.col||'var(--panel3)'})}
+function navOpen(mode){if(Q.on||PQ.on)return;if(mode)NAV.mode=mode;NAV.on=true;NAV.q='';$('#navSearch').value='';$('#nav').classList.add('on');NAV.stack=[];navPush(pageHome())}
+function navPush(pg){const cur=NAV.stack[NAV.stack.length-1];if(cur)cur.sc=$('#navBody').scrollTop;NAV.stack.push(pg);navRender()}
+function navBack(){NAV.stack.pop();NAV.q='';$('#navSearch').value='';navRender()}
+function navClose(){NAV.stack=[];navRender()}
+function pageHome(){return{t:NAV.mode==='quiz'?'Quiz':'Atlas d\'anatomie',secs:NSYS.map(([id,lab])=>{const s=SYSID[id];return{t:lab,cards:NREG.map(([r,rl])=>({t:rl,k:id+'|'+r,ps:s.state==='ready'?regParts(s,r):null,col:'#'+new THREE.Color(s.color).getHexString(),go:async()=>{toast('Chargement…');try{await loadSys(s)}catch{return}navPush(pageRegion(s,r,rl))}}))}})}}
+function uniq(ps){const m=new Map();for(const p of ps){if(p.side==='l')continue;if(!m.has(p.base))m.set(p.base,p)}return[...m.values()].sort((a,b)=>title(a).localeCompare(title(b),'fr'))}
+const chunks=(a,n)=>{const o=[];for(let i=0;i<a.length;i+=n)o.push(a.slice(i,i+n));if(o.length>1&&o[o.length-1].length<4)o[o.length-2].push(...o.pop());return o};
+function pageRegion(s,r,rl){const ps=regParts(s,r),us=uniq(ps),bone=s.id==='squelette',secs=[];
+  if(NAV.mode==='atlas'){secs.push({t:'Vues',cards:[{t:'Survol',sub:ps.length+' structures',k:s.id+'|'+r,ps,go:()=>viewSet(s,ps,rl)}]});
+    secs.push({t:bone?'Os':'Structures',cards:us.map(p=>({t:title(p),la:p.la,k:'p'+p.id,ps:[p],go:()=>bone?navPush(pageBone(s,p,ps)):viewPart(s,p,ps,'ctx')}))})}
+  else{const pool=us.filter(p=>p.fr&&p.radius>.004);secs.push({t:'Quiz : '+rl,cards:chunks(shuffleSeed(pool,r+s.id),12).map((c,i)=>({t:'Quiz #'+(i+1),sub:c.length+' structures',k:'q'+s.id+r+i,ps:c,quiz:{id:s.id+'|'+r+'|'+i},go:()=>pqStart({id:s.id+'|'+r+'|'+i,title:rl+' · Quiz #'+(i+1),sys:s,ctx:ps,parts:c})}))});
+    if(bone){const lb=us.filter(p=>(CAT.landmarks[p.name]||[]).length>=4);if(lb.length)secs.push({t:'Repères osseux',cards:lb.flatMap(p=>chunks(CAT.landmarks[p.name].map((L,i)=>i),12).map((c,i,a)=>({t:title(p)+(a.length>1?' · #'+(i+1):''),sub:c.length+' reliefs',k:'p'+p.id,ps:[p],quiz:{id:'lm|'+p.base+'|'+i},go:()=>pqStart({id:'lm|'+p.base+'|'+i,title:title(p)+' · reliefs'+(a.length>1?' #'+(i+1):''),sys:s,bone:p,lm:c})})))})}}
+  return{t:s.label+' › '+rl,secs}}
+function pageBone(s,p,ctx){const lm=CAT.landmarks[p.name]||[],v=[{t:'Survol',sub:'dans sa région',k:'c'+p.id,ps:ctx,go:()=>viewPart(s,p,ctx,'ctx')},{t:'Os isolé',k:'p'+p.id,ps:[p],go:()=>viewPart(s,p,ctx,'iso')}];
+  if(lm.length)v.push({t:'Repères d\'os',sub:lm.length+' reliefs',k:'p'+p.id,ps:[p],go:()=>viewPart(s,p,ctx,'lm')});
+  const secs=[{t:title(p),cards:v}];if(lm.length>=4)secs.push({t:'Quiz',cards:chunks(lm.map((L,i)=>i),12).map((c,i)=>({t:'Quiz #'+(i+1),sub:c.length+' reliefs',k:'p'+p.id,ps:[p],quiz:{id:'lm|'+p.base+'|'+i},go:()=>pqStart({id:'lm|'+p.base+'|'+i,title:title(p)+' · Quiz #'+(i+1),sys:s,bone:p,lm:c})}))});
+  return{t:title(p),secs}}
+function shuffleSeed(a,seed){let h=hash(seed);const r=()=>{h=Math.imul(h^(h>>>15),2246822507)+1|0;return((h>>>0)%1e6)/1e6};a=a.slice();for(let i=a.length-1;i>0;i--){const j=r()*(i+1)|0;[a[i],a[j]]=[a[j],a[i]]}return a}
+function showSet(s,ps){exOff();closeLm();if(INS.owner)closeIns(true);if(clip.on)setClip(false);select(null);const set=new Set(ps);SYS.forEach(x=>{if(!x.internal)x.on=x===s});for(const p of parts){p.ghost=false;p.flash=0;p.hidden=!set.has(p)}applyAll();SYS.forEach(sysRow);buildTree()}
+function viewSet(s,ps,lab){pushUndo();showSet(s,ps);navClose();fitAll(new THREE.Vector3(0,0,1),600);toast(lab+' · Survol')}
+function viewPart(s,p,ctx,mode){pushUndo();showSet(s,mode==='ctx'?ctx:[p]);navClose();select(p);if(mode==='lm'){openLm(p);card()}focusSel();toast(title(p)+(mode==='lm'?' · Repères d\'os':mode==='iso'?' · isolé':' · Survol'))}
+// quiz à pastilles : toutes les pastilles sont affichées, on clique celle du nom demandé
+function pqStart(def){navClose();PQ.def=def;PQ.snap=PQ.on?PQ.snap:snap();PQ.cam=PQ.on?PQ.cam:[camera.position.clone(),controls.target.clone()];pqClear();
+  const s=def.sys,dir=new THREE.Vector3(0,.1,1).normalize(),rcq=new THREE.Raycaster();rcq.firstHitOnly=true;PQ.items=[];
+  if(def.bone){showSet(s,[def.bone]);openLm(def.bone);const L=LM.list.slice();closeLm();for(const i of def.lm)PQ.items.push({fr:L[i].fr||L[i].en,la:L[i].la,pos:L[i].s.clone().addScaledVector(L[i].n,.001),part:def.bone})}
+  else{showSet(s,def.ctx);for(const p of def.parts){pbox(p);const o=p.center.clone().addScaledVector(dir,p.radius+.3);rcq.set(o,dir.clone().negate());const h=rcq.intersectObjects(p.meshes,false)[0];PQ.items.push({fr:title(p),la:p.la,pos:h?h.point.clone().addScaledVector(dir,.001):p.center.clone(),part:p})}}
+  const tex=pinTex('#ffffff','');PQ.pins=PQ.items.map((it,i)=>{const sp=new THREE.Sprite(new THREE.SpriteMaterial({map:tex,depthTest:false,depthWrite:false,sizeAttenuation:false,transparent:true}));sp.position.copy(it.pos);sp.renderOrder=30;sp.userData.i=i;sp.scale.setScalar(.02*CFG.pin*THREE.MathUtils.clamp(camera.aspect*1.1,.6,1));pinG.add(sp);return sp});
+  PQ.on=true;PQ.ok=PQ.ko=0;PQ.queue=shuffle(PQ.items.map((_,i)=>i));PQ.started=false;document.body.classList.add('inpq');$('#card').classList.remove('on');
+  const b=new THREE.Box3();PQ.items.forEach(it=>b.expandByPoint(it.pos));def.bone?flyTo(def.bone.center,def.bone.radius*1.1,new THREE.Vector3(0,0,1)):flyTo(b.getCenter(new THREE.Vector3()),Math.max(b.getSize(new THREE.Vector3()).length()/2*1.15,.1),new THREE.Vector3(0,0,1));pqPaint()}
+function pqClear(){for(const sp of PQ.pins){pinG.remove(sp);sp.material.dispose()}PQ.pins=[]}
+function pqPaint(end){const el=$('#pq'),d=PQ.def,n=PQ.items.length;el.classList.add('on');
+  if(end){const pc=Math.round(PQ.ok/(PQ.ok+PQ.ko)*100);el.innerHTML=`<div class="pqT">${esc(d.title)}</div><div class="score" style="color:${pc>=80?'var(--ok)':pc>=50?'var(--gold)':'var(--ko)'}">${pc} %</div><div class="mut">${PQ.ok} justes · ${PQ.ko} erreur${PQ.ko>1?'s':''} · meilleur score ${PQB[d.id]} %</div><div class="pqB"><button class="on" data-p="again">Recommencer</button><button data-p="nav">Autres quiz</button><button data-p="quit">Quitter</button></div>`;return}
+  if(!PQ.started){el.innerHTML=`<div class="pqT">${esc(d.title)}</div><div class="mut">${n} pastilles · clique celle qui correspond au nom affiché. Tu peux tourner et zoomer.</div><div class="pqB"><button class="on" data-p="go">Prêt · commencer le quiz</button><button data-p="quit">Quitter</button></div>`;return}
+  const it=PQ.items[PQ.queue[0]];el.innerHTML=`<div class="pqQ"><b>${esc(it.fr)}</b>${LA(it.la)?`<span class="la">${esc(it.la)}</span>`:''}</div><div class="pqS"><span class="ok">✓ ${PQ.ok}</span><span class="ko">✗ ${PQ.ko}</span><span class="mut">${PQ.queue.length} restantes</span><button data-p="reset" title="Recommencer ce quiz">↺</button><button data-p="quit">Quitter</button></div>`}
+function pqClick(h){if(!PQ.started||!h||h.pq===undefined||!PQ.queue.length)return;const want=PQ.queue[0],sp=PQ.pins[h.pq];
+  if(h.pq===want){PQ.ok++;sp.visible=false;PQ.queue.shift();const p=PQ.items[want].part;if(!PQ.def.bone){p.flash=1;apply(p);setTimeout(()=>{p.flash=0;apply(p)},500)}}
+  else{PQ.ko++;sp.material.color.set(0xff6050);setTimeout(()=>{sp.material.color.set(0xffffff);invalidate()},450);PQ.queue.push(PQ.queue.shift());toast('Non : c\'était « '+PQ.items[h.pq].fr+' »')}
+  invalidate();if(!PQ.queue.length){const pc=Math.round(PQ.ok/(PQ.ok+PQ.ko)*100);PQB[PQ.def.id]=Math.max(PQB[PQ.def.id]||0,pc);LS.set('pq',PQB);pqPaint(true)}else pqPaint()}
+function pqQuit(toNav){pqClear();PQ.on=false;document.body.classList.remove('inpq');$('#pq').classList.remove('on');parts.forEach(p=>p.flash=0);if(PQ.snap)restore(PQ.snap);
+  if(PQ.cam)tw={t0:performance.now(),ms:500,p0:camera.position.clone(),p1:PQ.cam[0],q0:controls.target.clone(),q1:PQ.cam[1]};invalidate();if(toNav)navOpen('quiz')}
+$('#pq').addEventListener('click',e=>{const b=e.target.closest('[data-p]');if(!b)return;const a=b.dataset.p;if(a==='go'){PQ.started=true;pqPaint()}else if(a==='quit')pqQuit();else if(a==='nav')pqQuit(true);else pqStart(PQ.def)});
+$('#navBody').addEventListener('click',e=>{const b=e.target.closest('.ncard');if(b)NAV.cards[+b.dataset.i].go()});
+$('#navBackBtn').onclick=()=>NAV.stack.length>1?navBack():navClose();$('#navClose').onclick=navClose;$('#navGrid').onclick=()=>{NAV.grid=!NAV.grid;LS.set('navgrid',NAV.grid);navRender()};
+$('#navSearch').oninput=e=>{NAV.q=e.target.value;navRender()};$('#navSearch').addEventListener('keydown',e=>e.stopPropagation());
+$$('#navTabs button').forEach(b=>b.onclick=()=>{NAV.mode=b.dataset.m;const d=NAV.stack.length;NAV.stack=[];navPush(pageHome())});
+$('#navBtn').onclick=()=>navOpen();
 // ------------------------------------------------------------------ démarrage
 SYS.forEach(sysRow);
 $$('#optList button').forEach(b=>{const k=b.dataset.opt;b.classList.toggle('on',!!OPT[k]);b.onclick=()=>{if(Q.on)return;OPT[k]=!OPT[k];LS.set('opt',OPT);b.classList.toggle('on',OPT[k]);

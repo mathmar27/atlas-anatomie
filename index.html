@@ -199,6 +199,20 @@ select option{color:#111}
  #card:not(.full) #cardHead::after{content:"Toucher pour les détails";display:block;font-size:11px;color:var(--mut);margin-top:2px}
  #card.full{max-height:70vh}#card.full #cardHead::after{content:"Toucher pour réduire";display:block;font-size:11px;color:var(--mut);margin-top:2px}
 }
+#nav{position:fixed;inset:0;z-index:25;display:none;flex-direction:column;background:radial-gradient(1200px 900px at 58% 30%,var(--bg1),var(--bg0))}#nav.on{display:flex}
+#nav header{display:flex;align-items:center;gap:10px;padding:12px 16px;border-bottom:1px solid var(--line)}#nav header b{font-size:16px;flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#navTabs{flex:none}#navTabs button{padding:6px 16px}#navSearch{width:170px;background:var(--panel2);border:1px solid var(--line);border-radius:9px;padding:6px 10px}
+#navBody{flex:1;min-height:0;padding:6px 18px 30px}#navBody h2{font-size:14px;font-weight:600;margin:22px 4px 10px;padding-bottom:7px;border-bottom:1px solid var(--line);text-align:center;color:var(--tx)}
+.ngrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(158px,1fr));gap:12px}
+.ncard{display:flex;flex-direction:column;align-items:center;gap:6px;padding:10px 8px 10px;border-radius:14px;background:var(--panel2);border:1px solid transparent;text-align:center;min-width:0}
+.ncard:hover{border-color:var(--acc);background:var(--panel3)}.ncard img{width:132px;height:132px;border-radius:12px;object-fit:contain}.ncard span{font-size:13px;font-weight:600;line-height:1.25}.ncard small{display:block;font-weight:400;font-size:11.5px;color:var(--mut)}
+.pill{display:block;width:64px;height:9px;border-radius:9px;border:1.5px solid var(--mut);overflow:hidden;flex:none}.pill i{display:block;height:100%}
+.ngrid.list{grid-template-columns:1fr;gap:4px}.ngrid.list .ncard{flex-direction:row;text-align:left;padding:6px 14px 6px 8px;gap:14px}.ngrid.list .ncard img{width:48px;height:48px;border-radius:9px}.ngrid.list .ncard span{flex:1}
+#pq{left:var(--L);right:0;margin-inline:auto;width:max-content;max-width:calc(100vw - var(--L) - 24px);bottom:16px;padding:12px 18px;display:none;text-align:center;z-index:7}#pq.on{display:block}
+.pqT{font-size:17px;font-weight:650;margin-bottom:4px}.pqB{display:flex;gap:8px;justify-content:center;margin-top:10px;flex-wrap:wrap}.pqB button{padding:8px 16px}
+.pqQ b{display:block;font-size:18px}.pqQ .la{color:var(--mut);font-size:13px}.pqS{display:flex;gap:14px;align-items:center;justify-content:center;margin-top:8px;font-size:14px}.pqS .ok{color:var(--ok);font-weight:700}.pqS .ko{color:var(--ko);font-weight:700}.pqS button{padding:4px 10px}
+.inpq #bar,.inpq #left,.inpq #menuBtn,.inpq #topR,.inpq #card{display:none!important}body.inpq{--L:0px}
+@media (max-width:820px){#nav header{flex-wrap:wrap;padding:10px}#navSearch{flex:1;width:auto;order:5}.ngrid{grid-template-columns:repeat(auto-fill,minmax(104px,1fr));gap:8px}.ncard img{width:88px;height:88px}#navBody{padding:4px 10px 24px}#pq{left:10px;right:10px;width:auto;max-width:none}}
 @media (prefers-reduced-motion:reduce){*{transition:none!important}}
 </style>
 </head>
@@ -247,7 +261,10 @@ select option{color:#111}
   <label>Rayon de la zone <input id="exRad" type="range" min="4" max="40" value="12"></label>
   <button id="exClose">Fermer</button><div id="exHint" class="mut"></div>
 </div>
-<div id="topR" class="panel"><button id="helpBtn" title="Aide et raccourcis (?)">?</button><button id="theme" title="Thème clair / sombre">◐</button><button id="setBtn" title="Réglages">⚙ Réglages</button></div>
+<div id="topR" class="panel"><button id="navBtn" class="on" title="Navigateur : Atlas et Quiz (N)">Atlas · Quiz</button><button id="helpBtn" title="Aide et raccourcis (?)">?</button><button id="theme" title="Thème clair / sombre">◐</button><button id="setBtn" title="Réglages">⚙ Réglages</button></div>
+<section id="nav"><header><button id="navBackBtn" title="Retour">←</button><b id="navTitle"></b><div class="seg" id="navTabs"><button data-m="atlas">Atlas</button><button data-m="quiz">Quiz</button></div>
+ <input id="navSearch" type="search" placeholder="Filtrer…"><button id="navGrid" title="Grille / liste"></button><button id="navClose" title="Fermer (Échap)">×</button></header><div id="navBody" class="scroll"></div></section>
+<div id="pq" class="panel"></div>
 <aside id="help" class="panel"><div id="setHead"><b>Aide</b><button id="helpClose" class="ghost">×</button></div><div id="helpBody" class="scroll"><table>
 <tr><td>Tourner</td><td>Glisser avec la souris ou un doigt</td></tr>
 <tr><td>Zoomer</td><td>Molette, deux doigts sur le trackpad, ou pincer. Le zoom vise le curseur.</td></tr>
@@ -263,6 +280,7 @@ select option{color:#111}
 <tr class="kb"><td><kbd>1</kbd>–<kbd>5</kbd></td><td>Vue de face · de dos · profil droit · profil gauche · de dessus</td></tr>
 <tr class="kb"><td><kbd>Z</kbd> <kbd>Maj</kbd>+<kbd>Z</kbd> <kbd>A</kbd></td><td>Annuler · rétablir · tout réafficher</td></tr>
 <tr><td>Sélection multiple</td><td><span class="kb">Maj + clic, ou </span>bouton « Sélection + » : isoler, masquer ou centrer plusieurs structures</td></tr>
+<tr><td>Atlas · Quiz</td><td>Bouton en haut à droite<span class="kb"> ou touche N</span> : parcourir les vues par système et par région, et lancer les quiz à pastilles</td></tr>
 <tr><td>Mes vues</td><td>Onglet « Vues » : enregistre l'affichage et l'angle actuels pour y revenir d'un clic</td></tr>
 <tr class="kb"><td><kbd>Échap</kbd></td><td>Fermer / désélectionner</td></tr>
 <tr class="kb"><td><kbd>1</kbd>–<kbd>4</kbd> <kbd>↵</kbd></td><td>Quiz : répondre · question suivante</td></tr>
@@ -276,6 +294,6 @@ select option{color:#111}
 window.addEventListener('error',e=>{const m=document.getElementById('splashMsg');if(m&&document.getElementById('splash').style.opacity!=='0'){m.className='err';
   m.textContent=location.protocol==='file:'?"Ouvre l'appli avec « Lancer l'atlas.command » (double-clic), pas en ouvrant index.html directement.":'Erreur de chargement : '+(e.message||'réseau')}} ,true);
 </script>
-<script type="module" src="app.js?v=51"></script>
+<script type="module" src="app.js?v=52"></script>
 </body>
 </html>
