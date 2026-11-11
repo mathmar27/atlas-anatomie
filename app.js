@@ -17,8 +17,25 @@ const LS={get(k,d){try{const v=localStorage.getItem('atlas.'+k);return v==null?d
 // ------------------------------------------------------------------ réglages
 const MOBILE=matchMedia('(pointer:coarse)').matches||Math.min(innerWidth,innerHeight)<600;
 const DEF={shadows:!MOBILE,shadowStrength:.65,ground:true,detail:MOBILE?0:1,exposure:1.05,quality:'auto',fov:30,zoom:1,rotate:1,invertZoom:false,inertia:true,
- pin:1,halo:1,labels:!MOBILE,ghost:.07,tips:true};
+ pin:1,halo:1,labels:!MOBILE,ghost:.07,tips:true,sex:'m'};
 const CFG=Object.assign({},DEF,LS.get('cfg',{}));
+// ------------------------------------------------------------------ morphologie féminine (déformation du modèle de base)
+const SEX=CFG.sex==='f'?'f':'m',SCL=SEX==='f'?.93:1;
+const sm=(a,b,x)=>{x=Math.min(1,Math.max(0,(x-a)/(b-a)));return x*x*(3-2*x)};
+function warpF(v){const y=v.y,ax=Math.abs(v.x);let fx=1;
+  fx+=.075*sm(.68,.84,y)*(1-sm(1.0,1.1,y))*(1-sm(.16,.20,ax));   // bassin plus large
+  fx-=.07*sm(1.08,1.2,y)*(1-sm(1.46,1.52,y));                    // thorax et épaules plus étroits
+  fx+=.22*sm(.775,.80,y)*(1-sm(.83,.875,y))*(1-sm(.05,.10,ax));  // angle sous-pubien plus ouvert
+  v.x*=fx;return v.multiplyScalar(.93)}
+const MALE=/penis|testi|scrot|prostat|epididym|seminal|deferens|ejaculat|^Urethra/i,FEMOLD=/uterus|^Vagina|Uterine tube|^Ovar|ligament of ovary/i;
+const _wv=new THREE.Vector3();
+function warpMesh(o,name){
+  let g=o.geometry;if(g.userData.src){const src=g.userData.src;g=o.geometry=g.clone();g.setAttribute('position',src.clone())}else g.userData.src=g.attributes.position.clone();
+  const P=g.attributes.position,M=o.matrixWorld,I=M.clone().invert(),bl=/^Urinary bladder/.test(name),sg=/^Sigmoid colon/.test(name),v=_wv;
+  for(let i=0;i<P.count;i++){v.fromBufferAttribute(P,i).applyMatrix4(M);
+    if(bl){v.z=.042-(.042-v.z)*.6;v.y=.829+(v.y-.829)*.8}else if(sg)v.z=-.072+(v.z+.072)*(1-.25*(1-sm(.87,.93,v.y)));
+    warpF(v).applyMatrix4(I);P.setXYZ(i,v.x,v.y,v.z)}
+  P.needsUpdate=true;g.computeBoundingBox();g.computeBoundingSphere()}
 // ------------------------------------------------------------------ systèmes
 const SYS=[
  {id:'squelette',label:'Squelette',files:['squelette.glb','sesamoides_main.glb'],color:0xe6d9bd,rough:.66},
@@ -33,6 +50,7 @@ const SYS=[
  {id:'insertions',label:'Insertions musculaires',files:['insertions.glb'],color:0xe0504a,rough:.6,internal:true},
 ];
 SYS.forEach(s=>{s.on=false;s.state='';s.parts=[];s.promise=null});
+if(SEX!=='f')SYS.find(s=>s.id==='feminin').internal=true;
 const SYSID=Object.fromEntries(SYS.map(s=>[s.id,s]));
 const SHORT={articulations:'Articulations',vaisseaux:'Vaisseaux',nerfs:'Nerfs',feminin:'Génital féminin',regions:'Peau et régions'};
 const TYPE={Bone:'Os',Cartilage:'Cartilage',Teeth:'Dent','Teeth-roots':'Racine dentaire',Suture:'Suture',Tendon:'Tendon',Fascia:'Fascia',Ligament:'Ligament',
@@ -112,9 +130,10 @@ let CAT={names:{},landmarks:{}};
 const parts=[];const S={sel:null,hov:null,labels:CFG.labels};
 let pickDirty=true,pickables=[];
 const OPT=LS.get('opt',{Fascia:false,Bursa:false});
-const defHidden=p=>!!p.ins||(p.mat in OPT&&!OPT[p.mat]);
+const defHidden=p=>!!p.ins||!!p.defOff||(p.mat in OPT&&!OPT[p.mat]);
 function splitName(n){n=n.replace(/\.\d{3}$/,'').trim();const m=n.match(/^(.*)\.([lr])$/);return m?[m[1].trim(),m[2]]:[n.replace(/\.$/,''),'']}
 function tint(mn,orig,s,name){
+  if(mn==='Black')return new THREE.Color(/lash|brow/i.test(name)?0x1d130d:0x33200f);
   if(s.id==='insertions')return new THREE.Color(/^(End|Muscular ending)/i.test(mn)?0x3f86e8:0xe0504a);
   if(/^Bone|^Os-/.test(mn))return new THREE.Color(0xe6d9bd);
   if(/^Suture/.test(mn))return new THREE.Color(0xb9ab8f);
@@ -126,7 +145,7 @@ function tint(mn,orig,s,name){
   if(s.id==='muscles'||mn==='Trapezius'||mn==='Diaphragm'||FUNC[mn]){c.set(0xa9463e);const h=(hash(name)%100)/100;c.offsetHSL((h-.5)*.02,0,(h-.5)*.07)}
   return c}
 const SURF={uDetail:{value:0}};
-function kindOf(mn,s){if(/^Bone|^Os-|Teeth|Suture|Dentine/.test(mn))return 1;if(/Tendon|Ligament|Fascia|capsule|Cartilage/i.test(mn))return 5;if(s.id==='muscles'||FUNC[mn])return 2;
+function kindOf(mn,s){if(mn==='Black')return 6;if(/^Bone|^Os-|Teeth|Suture|Dentine/.test(mn))return 1;if(/Tendon|Ligament|Fascia|capsule|Cartilage/i.test(mn))return 5;if(s.id==='muscles'||FUNC[mn])return 2;
   return{vaisseaux:3,nerfs:3,lymphatique:3,regions:4,squelette:1,insertions:3}[s.id]||0}
 function surfKey(){return'surf'+(this.userData.kind|0)+(this.userData.halo?'h':'')+(CFG.detail>0?'d':'')}
 const GLSL_NOISE=`
@@ -147,6 +166,8 @@ float surfH(vec3 p,float px){float h=0.;
  float a=FADE(2600.),b=FADE(130.);if(a>0.)h+=a*fbm(p*2600.)*.6;if(b>0.)h+=b*fbm(p*130.)*.4;
 #elif KIND==3
  float a=FADE(600.);if(a>0.)h+=a*fbm(p*600.)*.6;
+#elif KIND==6
+ float a=FADE(500.);if(a>0.)h+=a*fbm(vec3(p.x*1500.,p.y*70.,p.z*1500.))*1.2;
 #else
  float a=FADE(800.),b=FADE(95.);if(a>0.)h+=a*fbm(p*800.)*.5;if(b>0.)h+=b*fbm(p*95.)*.6;
 #endif
@@ -160,6 +181,9 @@ float surfH(vec3 p,float px){float h=0.;
 #elif KIND==3
  #define BUMP .00007
  #define CAMP .08
+#elif KIND==6
+ #define BUMP .0005
+ #define CAMP .7
 #elif KIND==4
  #define BUMP .00006
  #define CAMP .1
@@ -177,6 +201,9 @@ function surfCompile(sh){
     .replace('#include <color_fragment>',`#include <color_fragment>
     #ifdef SURF_DETAIL
     {gH=surfH(vHP,length(fwidth(vHP)));diffuseColor.rgb*=1.+(gH-.45)*CAMP*uDetail;
+     #if KIND==4
+      diffuseColor.rgb*=mix(vec3(1.),vec3(1.07,.95,.92),clamp(fbm(vHP*34.)*1.3-.25,0.,1.)*min(1.,uDetail)*.6);
+     #endif
      #if KIND==1
       diffuseColor.rgb=mix(diffuseColor.rgb,diffuseColor.rgb*vec3(.84,.72,.58),clamp((.42-gH)*1.6,0.,1.)*min(1.,uDetail)*.55);
      #endif
@@ -203,7 +230,7 @@ function ingest(gltf,s){
     if(!o.isMesh)return;
     const owner=o.userData.name!==undefined?o:o.parent,name=owner&&owner.userData.name;
     const mn=(o.material&&o.material.name)||'';
-    if(!name||mn==='Text'){o.visible=false;return}
+    if(!name||mn==='Text'||(SEX==='f'&&(MALE.test(name)||(s.id==='feminin'&&FEMOLD.test(name))))){o.visible=false;return}
     let p=owners.get(owner);
     if(!p){const [base,side]=splitName(name),nm=CAT.names[name];
       p={id:parts.length,name,base,side,sys:s,mat:mn.replace(/-\d+$/,''),meshes:[],fr:nm?nm[0]:'',la:nm?nm[1]:'',en:base,hidden:false,ghost:false,lmOn:false,flash:0,box:null};
@@ -214,6 +241,7 @@ function ingest(gltf,s){
     const mat=new THREE.MeshStandardMaterial({color:base.clone(),roughness:s.rough,metalness:0,envMapIntensity:.7,side:o.material.side});
     mat.userData.kind=kindOf(mn,s);mat.onBeforeCompile=surfCompile;mat.customProgramCacheKey=surfKey;o.castShadow=o.receiveShadow=true;
     if(s.id==='insertions'){mat.polygonOffset=true;mat.polygonOffsetFactor=-3;mat.polygonOffsetUnits=-3}
+    if(SEX==='f')warpMesh(o,name);
     mat.userData.base=base;o.material=mat;o.userData.part=p;p.meshes.push(o);o.matrixAutoUpdate=false});
   root.traverse(o=>{o.matrixAutoUpdate=false});world.add(root)}
 const title=p=>p.ins?(p.ins.type==='o'?'Origine — ':'Terminaison — ')+(p.fr||p.en):(p.fr||p.en);
@@ -243,7 +271,7 @@ function loadSys(s){
     const prog=s.files.map(()=>0);
     try{
       const gl=await Promise.all(s.files.map((f,i)=>new Promise((res,rej)=>gltfL.load(EXPORT+encodeURI(f),res,e=>{if(e.total){prog[i]=e.loaded/e.total;s.prog=prog.reduce((a,b)=>a+b,0)/prog.length;sysRow(s);setLoader(s.prog*.95)}},rej))));
-      gl.forEach(g=>ingest(g,s));s.state='ready';s.parts.forEach(apply);indexSys(s);
+      gl.forEach(g=>ingest(g,s));if(s.id==='feminin'&&SEX==='f')genFemale(s);s.state='ready';s.parts.forEach(apply);indexSys(s);
     }catch(e){s.state='';s.promise=null;toast('Impossible de charger « '+s.label+' » ('+s.files.join(', ')+')');throw e}
     finally{loading--;setLoader(1);sysRow(s)}
   })();
@@ -287,6 +315,7 @@ function onClick(e){
   const h=pick(e);
   if(Q.on){quizClick(h);return}
   if(h&&h.lm!==undefined){selectLm(h.lm,true);return}
+  if((EX.on||EX.arm)&&h&&h.part&&h.point){exClick(h);select(h.part);return}
   if(DIS&&h&&h.part){pushUndo();const p=h.part;p.hidden=true;apply(p);if(S.sel===p)select(null);setHover(null);hideTip();buildTree();return}
   select(h?h.part:null)}
 const tip=$('#tip');
@@ -431,7 +460,7 @@ function card(){
     ${lm?`<button class="wide ${LM.bone===p?'on':''}" data-a="lm">Reliefs osseux · ${lm.length}<kbd>R</kbd></button>`:''}
     ${bone&&!p.ins?`<button class="wide ${INS.owner===p?'on':''}" data-a="ins">Insertions musculaires sur cet os</button>`:''}
     ${p.sys.id==='muscles'&&FUNC[p.mat]?`<button class="wide ${INS.owner===p?'on':''}" data-a="ins">Origines et terminaisons</button>`:''}
-    ${p.ins?'':`<button class="wide ${EX.on&&EX.scope==='sel'?'on':''}" data-a="explode" title="Écarter les structures voisines pour voir comment elles s'assemblent">Vue éclatée autour<kbd>E</kbd></button>`}
+    ${p.ins?'':`<button class="wide ${EX.on?'on':''}" data-a="explode" title="Écarter les structures voisines pour voir comment elles s'assemblent">Éclater cette zone<kbd>E</kbd></button>`}
     ${p.ins?'':`<button data-a="prev" title="Structure précédente de la liste">‹ Précédente<kbd>←</kbd></button><button data-a="next" title="Structure suivante de la liste">Suivante ›<kbd>→</kbd></button>`}</div><div id="desc"></div>`;
   if(LM.bone===p){h+=`<h3>Reliefs</h3>`+LM.list.map(L=>`<button class="lm ${L.i===LM.sel?'sel':''}" data-lm="${L.i}" style="--c:${L.css}"><i>${L.i+1}</i><span>${esc(L.fr||L.en)}${L.la?`<small>${esc(L.la)}</small>`:''}</span></button>`).join('')
     +`<div class="note">La pastille est placée au point exact du modèle Z-Anatomy. Le halo coloré autour indique seulement la zone voisine : son étendue est indicative.</div>`}
@@ -489,16 +518,17 @@ async function fetchDesc(t){
   return{t:text,l:page?lang:'fr',u:page?page.title:'',f}}
 function descTarget(noLm){const p=S.sel;if(!p)return null;
   if(!noLm&&LM.bone===p&&LM.sel>=0){const L=LM.list[LM.sel];return{key:'lm|'+L.en,id:L.id,fr:L.fr,en:L.en,name:L.fr||L.en,lm:true}}
-  const nm=CAT.names[p.name]||[];return{key:p.ins?p.ins.muscle:p.base,id:nm[2],fr:p.fr,en:p.ins?p.ins.muscle:p.base,name:p.fr||p.en}}
+  const nm=CAT.names[p.name]||[];return{key:p.ins?p.ins.muscle:p.base,id:nm[2],fr:p.wiki||p.fr,en:p.ins?p.ins.muscle:p.base,name:p.fr||p.en,info:p.info}}
 function paintDesc(t,d){const el=$('#desc');if(!el)return;const head=`<h3>${t.lm?'Relief : '+esc(t.name):'Description'}</h3>`;
   if(!d){el.innerHTML=head+'<div class="note">Description indisponible pour le moment : elle se charge depuis Internet. Elle reste ensuite enregistrée.</div>';return}
   if(d.none){el.innerHTML=t.lm?'':head+`<div class="note">Pas de fiche descriptive pour cette structure. <a target="_blank" rel="noopener" href="https://fr.wikipedia.org/w/index.php?search=${encodeURIComponent(t.name)}">Chercher sur Wikipédia</a></div>`;return}
   const long=d.t.length>340;
   el.innerHTML=head+(d.t?`<div class="desc ${long?'':'open'}"><p>${esc(d.t).replace(/\n+/g,'<br>')}</p>${long?'<button class="more ghost" data-a="more">Lire la suite</button>':''}</div>`:'')
    +(d.f&&d.f.length?`<dl class="facts">${d.f.map(([a,v])=>`<dt>${esc(a)}</dt><dd>${v.map(esc).join(', ')}</dd>`).join('')}</dl>`:'')
-   +`<div class="src">Source : ${d.u?`<a target="_blank" rel="noopener" href="https://${d.l}.wikipedia.org/wiki/${encodeURIComponent(d.u.replace(/ /g,'_'))}">Wikipédia${d.l==='en'?' (en anglais)':''}</a> · `:''}Wikidata — CC BY-SA</div>`}
+   +(d.own?'<div class="src">Fiche de l\'atlas : repères classiques d\'anatomie descriptive.</div>':'')+(d.own?'':`<div class="src">Source : ${d.u?`<a target="_blank" rel="noopener" href="https://${d.l}.wikipedia.org/wiki/${encodeURIComponent(d.u.replace(/ /g,'_'))}">Wikipédia${d.l==='en'?' (en anglais)':''}</a> · `:''}Wikidata — CC BY-SA</div>`)}
 async function showDesc(noLm){
   const t=descTarget(noLm),el=$('#desc');if(!t||!el)return;const tok=++descTok,thin=d=>t.lm&&(!d||d.none||!d.t);
+  if(t.info){paintDesc(t,{t:t.info,l:'fr',u:'',f:[],own:1});return}
   if(DESC[t.key]){if(thin(DESC[t.key]))return showDesc(true);paintDesc(t,DESC[t.key]);return}
   el.innerHTML=`<h3>${t.lm?'Relief : '+esc(t.name):'Description'}</h3><div class="note">Chargement…</div>`;
   let d=null;try{d=await fetchDesc(t)}catch{}
@@ -573,7 +603,7 @@ function setClip(on){
   clip.on=on;$('#clipPop').classList.toggle('on',on);$('#clipBtn').classList.toggle('on',on);
   if(on){clip.box=visibleBox();if(clip.box.isEmpty())clip.box.set(new THREE.Vector3(-1,0,-1),new THREE.Vector3(1,1.8,1));updClip()}
   renderer.clippingPlanes=on?[clip.plane]:[];
-  for(const p of parts)for(const m of p.meshes){const sd=on?THREE.DoubleSide:THREE.FrontSide;if(m.material.side!==sd){m.material.side=sd;m.material.needsUpdate=true}}
+  for(const p of parts)if(!p.gen)for(const m of p.meshes){const sd=on?THREE.DoubleSide:THREE.FrontSide;if(m.material.side!==sd){m.material.side=sd;m.material.needsUpdate=true}}
   pickDirty=true;invalidate()}
 function updClip(){const a=clip.axis,k=+$('#clipPos').value/1000,v=clip.box.min[a]+(clip.box.max[a]-clip.box.min[a])*k,s=clip.flip?1:-1;
   clip.plane.normal.set(a==='x'?s:0,a==='y'?s:0,a==='z'?s:0);clip.plane.constant=-s*v;invalidate()}
@@ -593,21 +623,20 @@ addEventListener('keydown',e=>{
   if(Q.on){quizKey(e,k);return}
   if(k==='/'){e.preventDefault();leftOpen(true);$('#search').focus()}
   else if(k==='?'){toggleHelp()}
-  else if(k==='escape'){if($('#help').classList.contains('on'))toggleHelp(false);else if($('#settings').classList.contains('on'))$('#setClose').click();else if(EX.on)setExplode(false);else if(DIS)setDis(false);else if(clip.on)setClip(false);else if(LM.sel>=0)selectLm(-1);else select(null)}
-  else if(k==='e'){if(EX.on)setExplode(false);else if(S.sel&&!S.sel.ins)explodeAround();else setExplode(true,'all')}else if(k==='d')setDis(!DIS)
+  else if(k==='escape'){if($('#help').classList.contains('on'))toggleHelp(false);else if($('#settings').classList.contains('on'))$('#setClose').click();else if(EX.on||EX.arm)setExplode(false);else if(DIS)setDis(false);else if(clip.on)setClip(false);else if(LM.sel>=0)selectLm(-1);else select(null)}
+  else if(k==='e'){if(EX.on||EX.arm)setExplode(false);else if(S.sel&&!S.sel.ins)explodeAround();else setExplode(true)}else if(k==='d')setDis(!DIS)
   else if(k==='z')undo();else if(k==='a')showAll();else if(k==='l')$('#labBtn').click();
   else if(k==='arrowleft'||k==='arrowright'){if(S.sel){e.preventDefault();step(k==='arrowleft'?-1:1)}}
   else if(S.sel){if(k==='i')isolate(S.sel);else if(k==='h')hideSel();else if(k==='g')ghostOthers();else if(k==='f')focusSel();else if(k==='r')toggleLm();else if(k==='s')toggleFav()}});
 
-// ------------------------------------------------------------------ vue éclatée et dissection
-const EX={on:false,k:0,t:0,scope:'all',set:[],C:new THREE.Vector3()};let DIS=false;
+// ------------------------------------------------------------------ vue éclatée (locale, progressive) et dissection
+const EX={on:false,arm:false,k:0,t:0,R:.12,set:[],C:new THREE.Vector3()};let DIS=false;
 const _eo=new THREE.Vector3();
-function exCollect(){
-  exRestore();const sel=EX.scope==='sel'&&S.sel&&!S.sel.ins?S.sel:null,vis=parts.filter(p=>p.sys.on&&!p.hidden&&!p.ins&&!p.ghost);
-  if(sel){pbox(sel);EX.C.copy(sel.center)}else{const b=new THREE.Box3();vis.forEach(p=>b.union(pbox(p)));b.getCenter(EX.C)}
-  const R=sel?Math.max(sel.radius*2.5,.14):1e9;
-  for(const p of vis){pbox(p);const d=p.center.clone().sub(EX.C),l=d.length();if(l<1e-4||(sel&&p!==sel&&l-p.radius>R))continue;
-    p.exDir=d.multiplyScalar((sel?Math.min(l,.3)*1.25:l*.85)/l);EX.set.push(p)}}
+function exCollect(keep){
+  exRestore();
+  for(const p of parts){if(!p.sys.on||p.hidden||p.ins||p.ghost)continue;pbox(p);if(p.box.distanceToPoint(EX.C)>EX.R)continue;
+    const d=p.center.clone().sub(EX.C),l=d.length();if(l<1e-4)continue;p.exDir=d.multiplyScalar((.012+Math.min(l,.22)*.62)/l);EX.set.push(p)}
+  if(keep){EX.k=EX.t;exApply()}}
 function exApply(){
   for(const p of EX.set){_eo.copy(p.exDir).multiplyScalar(EX.k);
     for(const m of p.meshes){const u=m.userData;if(!u.w0){u.w0=m.matrixWorld.clone();u.l0=m.matrix.clone();u.pinv=m.parent.matrixWorld.clone().invert()}
@@ -615,21 +644,56 @@ function exApply(){
     p.exOff=EX.k?_eo.clone():null}
   pickDirty=true;invalidate()}
 function exRestore(){for(const p of EX.set){for(const m of p.meshes){const u=m.userData;if(u.l0){m.matrix.copy(u.l0);m.updateMatrixWorld(true)}}p.exOff=null}EX.set=[];EX.k=0;pickDirty=true}
-function exUI(){$('#exPop').classList.toggle('on',EX.on);$('#exBtn').classList.toggle('on',EX.on);$$('#exScope button').forEach(b=>b.classList.toggle('on',b.dataset.s===EX.scope));const c=$('#cardBody [data-a=explode]');if(c)c.classList.toggle('on',EX.on&&EX.scope==='sel')}
-function exOff(){if(!EX.on&&!EX.set.length)return;EX.on=false;EX.t=0;exRestore();exUI();invalidate()}
-function setExplode(on,scope){
-  if(!on){EX.on=false;EX.t=0;exUI();invalidate();return}
+function exUI(){const on=EX.on||EX.arm;$('#exPop').classList.toggle('on',on);$('#exBtn').classList.toggle('on',on);$('#exHint').textContent=EX.on?(EX.set.length+' structures dans la zone · clique ailleurs pour déplacer le centre'):'Clique sur la zone à éclater';
+  const c=$('#cardBody [data-a=explode]');if(c)c.classList.toggle('on',EX.on)}
+function exOff(){if(!EX.on&&!EX.arm&&!EX.set.length)return;EX.on=EX.arm=false;EX.t=0;exRestore();exUI();invalidate()}
+function setExplode(on,point){
+  if(!on){EX.on=EX.arm=false;EX.t=0;exUI();invalidate();return}
   if(Q.on)return;if(LM.bone){closeLm();card()}if(INS.owner)closeIns();
-  if(scope)EX.scope=scope;if(EX.scope==='sel'&&(!S.sel||S.sel.ins))EX.scope='all';
-  exCollect();EX.on=true;EX.t=+$('#exPos').value/100*1.5;exUI();invalidate();
-  if(EX.set.length<2)toast('Affiche au moins deux structures pour les écarter')}
+  if(!EX.on){$('#exPos').value=0;EX.t=0}
+  if(point)EX.C.copy(point);else if(S.sel&&!S.sel.ins&&!S.sel.hidden){pbox(S.sel);EX.C.copy(S.sel.center)}else{EX.arm=true;exUI();return}
+  EX.R=+$('#exRad').value/100;EX.arm=false;EX.on=true;exCollect(true);exUI();
+  if(EX.t===0)toast('Glisse le curseur « Écartement » pour ouvrir la zone progressivement')}
+function exClick(h){const c=h.point.clone();if(h.part.exOff)c.sub(h.part.exOff);setExplode(true,c)}
 async function explodeAround(){const p=S.sel;if(!p||p.ins||Q.on)return;
   if(p.sys.id==='squelette'||p.sys.id==='articulations')for(const id of['squelette','articulations'])if(!SYSID[id].on)await setSys(SYSID[id],true);
-  setExplode(true,'sel');pbox(p);flyTo(p.center,Math.max(p.radius*2.6,.17))}
+  setExplode(true);flyTo(EX.C,Math.max(EX.R*1.9,.16))}
+// ------------------------------------------------------------------ vues par région, articulation et appareil
+const VIEWS=[['Articulations (côté droit)',[
+  ['Épaule',{sph:['Humerus.r',1,.12]}],['Coude',{sph:['Humerus.r',0,.10]}],['Poignet et main',{sph:['Radius.r',0,.15,-.06]}],
+  ['Hanche',{sph:['Femur.r',1,.13]}],['Genou',{sph:['Femur.r',0,.11]}],['Cheville et pied',{sph:['Tibia.r',0,.16,-.04,.05]}]]],
+ ['Régions',[
+  ['Tête et cou',{sys:['squelette','muscles'],box:[1.43,9]}],
+  ['Rachis',{re:/vertebra|atlas|axis|sacrum|coccyx|intervertebral|longitudinal|flav|spin|nuch|zygapophys|costovertebral/i,dir:[-1,0,.25]}],
+  ['Thorax',{sys:['squelette','visceres','vaisseaux'],box:[1.09,1.46],ax:.2}],['Abdomen',{sys:['squelette','visceres'],box:[.94,1.2],ax:.2}],
+  ['Pelvis',{sys:SEX==='f'?['squelette','articulations','visceres','feminin']:['squelette','articulations','visceres'],box:[.74,.955],ax:.2}]]],
+ ['Appareils',[
+  ['Digestif',{sys:['visceres'],ctx:1,re:/stomach|intestin|colon|liver|gallbladder|pancrea|oesophag|duoden|jejun|ileum|appendix|pharynx|tongue|parotid|subling|submandib|bile|omentum|taenia|palate|gingiva/i}],
+  ['Respiratoire',{sys:['visceres'],ctx:1,re:/lung|trachea|bronch|pleura|nasal|epiglott|laryng|nasophar/i}],
+  ['Urinaire',{sys:['visceres'],ctx:1,re:/kidney|ureter|bladder|urethr|renal/i}],
+  ['Cœur et gros vaisseaux',{sys:['vaisseaux'],ctx:1,re:/heart|atrium|ventricle|leaflet|papillary|coronary|interventricular|pulmonary trunk|ascending aorta|circumflex|arch of aorta|vena cava/i}],
+  ['Glandes endocrines',{sys:['visceres'],ctx:1,re:/thyroid|hypophysis|pineal|suprarenal|pancreas/i}]].concat(SEX==='f'?[['Génital féminin',{sys:['feminin'],ctx:1,re:/./}]]:[])]];
+function viewsPane(){$('#pane-views').innerHTML=VIEWS.map((g,i)=>`<h3>${g[0]}</h3><div class="vgrid">${g[1].map((v,j)=>`<button data-v="${i}.${j}">${v[0]}</button>`).join('')}</div>`).join('')
+  +'<div class="note">Une vue charge les systèmes utiles et n\'affiche que la région choisie. Ajoute ensuite d\'autres systèmes depuis « Explorer », ou reviens avec « Tout afficher ».</div>'}
+$('#pane-views').addEventListener('click',e=>{const b=e.target.closest('[data-v]');if(!b)return;const [i,j]=b.dataset.v.split('.');applyView(VIEWS[i][1][j])});
+async function applyView(V){
+  if(Q.on)return;const v=V[1],ids=v.sys||['squelette','articulations'],all=v.ctx?ids.concat('squelette'):ids;
+  toast('Chargement de la vue « '+V[0]+' »…');for(const id of all)try{await loadSys(SYSID[id])}catch{return}
+  pushUndo();exOff();closeLm();if(INS.owner)closeIns(true);select(null);
+  let c=null;if(v.sph){const b=parts.find(p=>p.name===v.sph[0]);pbox(b);c=new THREE.Vector3((b.box.min.x+b.box.max.x)/2,(v.sph[1]?b.box.max.y-.02:b.box.min.y)+(v.sph[3]||0),(b.box.min.z+b.box.max.z)/2+(v.sph[4]||0))}
+  SYS.forEach(s=>{if(!s.internal)s.on=all.includes(s.id)});
+  for(const p of parts){p.ghost=false;if(p.ins){p.hidden=true;continue}if(!p.sys.on)continue;pbox(p);
+    if(v.ctx&&p.sys.id==='squelette'&&!ids.includes('squelette')){p.hidden=false;p.ghost=true;continue}
+    const ok=c?(p.box.distanceToPoint(c)<v.sph[2]*.5||p.center.distanceTo(c)<v.sph[2]):v.box?(p.center.y>=v.box[0]*SCL&&p.center.y<=v.box[1]*SCL&&(!v.ax||Math.abs(p.center.x)<v.ax)):v.re.test(p.name);
+    p.hidden=!ok||defHidden(p)}
+  applyAll();SYS.forEach(sysRow);buildTree();
+  const b=new THREE.Box3();for(const p of parts)if(p.sys.on&&!p.hidden&&!p.ghost)b.union(c?p.box.clone().intersect(new THREE.Box3().setFromCenterAndSize(c,new THREE.Vector3(1,1,1).multiplyScalar(v.sph[2]*2.4))):p.box);
+  if(!b.isEmpty())flyTo(b.getCenter(new THREE.Vector3()),b.getSize(new THREE.Vector3()).length()/2,new THREE.Vector3(...(v.dir||[0,0,1])),700);
+  if(innerWidth<=820)leftOpen(false);toast('Vue : '+V[0]+' — « Tout afficher » (A) pour revenir')}
 function setDis(on,silent){DIS=on;$('#disBtn').classList.toggle('on',on);canvas.style.cursor='';if(on&&!silent)toast('Dissection : chaque clic retire une structure. Annuler (Z) la remet.')}
-$('#exBtn').onclick=()=>setExplode(!EX.on);$('#exClose').onclick=()=>setExplode(false);
-$('#exPos').oninput=e=>{EX.t=+e.target.value/100*1.5;invalidate()};
-$$('#exScope button').forEach(b=>b.onclick=()=>{if(b.dataset.s==='sel'&&(!S.sel||S.sel.ins)){toast('Sélectionne d\'abord une structure');return}setExplode(true,b.dataset.s)});
+$('#exBtn').onclick=()=>{if(EX.on||EX.arm)setExplode(false);else if(S.sel&&!S.sel.ins)explodeAround();else setExplode(true)};$('#exClose').onclick=()=>setExplode(false);
+$('#exPos').oninput=e=>{EX.t=+e.target.value/100;invalidate()};
+$('#exRad').oninput=e=>{EX.R=+e.target.value/100;if(EX.on){exCollect(true);exUI()}};
 $('#disBtn').onclick=()=>{if(!Q.on)setDis(!DIS)};
 $('#quizBtn').onclick=()=>{leftOpen(true);$('.tabs [data-tab=quiz]').click()};
 // ------------------------------------------------------------------ panneau de réglages
@@ -660,7 +724,7 @@ $('#settings').addEventListener('input',e=>{const t=e.target,k=t.dataset.k;if(!k
 $('#settings').addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;
   if(b.id==='setClose'){$('#settings').classList.remove('on');$('#setBtn').classList.remove('on')}
   else if(b.id==='setShot')shot();
-  else if(b.id==='setReset'){Object.assign(CFG,DEF);LS.set('cfg',CFG);applyCfg('*');buildSettings()}
+  else if(b.id==='setReset'){Object.assign(CFG,DEF,{sex:SEX});LS.set('cfg',CFG);applyCfg('*');buildSettings()}
   else if(b.dataset.k){const v=b.dataset.v;setCfg(b.dataset.k,isNaN(+v)?v:+v)}});
 $('#setBtn').onclick=()=>{const on=!$('#settings').classList.contains('on');$('#settings').classList.toggle('on',on);$('#setBtn').classList.toggle('on',on);if(on)buildSettings()};
 applyCfg('*');booted=true;
@@ -763,6 +827,70 @@ function quizKey(e,k){
   if(k==='enter'||k===' '){e.preventDefault();if(Q.done)return;if(Q.answered)quizNext();return}
   if(/^[1-4]$/.test(k)&&!Q.answered){const b=$$('#qzOpts button')[+k-1];if(b)b.click()}}
 
+$$('#sexSeg button').forEach(b=>{b.classList.toggle('on',b.dataset.sex===SEX);b.onclick=()=>{if(b.dataset.sex===SEX)return;CFG.sex=b.dataset.sex;LS.set('cfg',CFG);location.reload()}});
+// ------------------------------------------------------------------ appareil génital féminin : organes internes générés (formes paramétriques aux dimensions anatomiques)
+function sweep(pts,rf,t0=0,t1=1,n=36,m=26){
+  const c=new THREE.CatmullRomCurve3(pts,false,'centripetal'),pos=[],idx=[],T=new THREE.Vector3(),N=new THREE.Vector3(),B=new THREE.Vector3(),P=new THREE.Vector3(),X=new THREE.Vector3(1,0,0),Z=new THREE.Vector3(0,0,1);
+  c.getTangentAt(.5,T);const ref=Math.abs(T.x)>.75?Z:X;
+  for(let i=0;i<=n;i++){const t=t0+(t1-t0)*i/n;c.getPointAt(t,P);c.getTangentAt(t,T);N.copy(ref).addScaledVector(T,-ref.dot(T)).normalize();B.crossVectors(T,N);const r=rf(t),a=r[0],b=r[1];
+    for(let j=0;j<m;j++){const th=j/m*Math.PI*2,ca=a*Math.cos(th),sb=b*Math.sin(th);pos.push(P.x+N.x*ca+B.x*sb,P.y+N.y*ca+B.y*sb,P.z+N.z*ca+B.z*sb)}}
+  for(let i=0;i<n;i++)for(let j=0;j<m;j++){const a=i*m+j,b=i*m+(j+1)%m;idx.push(a,a+m,b,b,a+m,b+m)}
+  return{pos,idx}}
+function geoOf(list){const pos=[],idx=[];for(const g of list){const o=pos.length/3;for(const v of g.pos)pos.push(v);for(const i of g.idx)idx.push(i+o)}
+  const v=new THREE.Vector3();for(let i=0;i<pos.length;i+=3){warpF(v.set(pos[i],pos[i+1],pos[i+2]));pos[i]=v.x;pos[i+1]=v.y;pos[i+2]=v.z}
+  const g=new THREE.BufferGeometry();g.setAttribute('position',new THREE.Float32BufferAttribute(pos,3));g.setIndex(idx);g.computeVertexNormals();g.computeBoundingBox();return g}
+function genPart(s,o){
+  const [base,side]=splitName(o.name),p={id:parts.length,name:o.name,base,side,sys:s,mat:'Organ',meshes:[],fr:o.fr,la:o.la||'',en:base,hidden:!!o.off,defOff:!!o.off,ghost:false,lmOn:false,flash:0,box:null,gen:true,info:o.info,wiki:o.wiki};
+  const col=new THREE.Color(o.color),mat=new THREE.MeshStandardMaterial({color:col.clone(),roughness:o.rough||.5,metalness:0,envMapIntensity:.7,side:THREE.DoubleSide});
+  mat.userData.kind=o.kind===undefined?2:o.kind;mat.userData.base=col;mat.onBeforeCompile=surfCompile;mat.customProgramCacheKey=surfKey;
+  const m=new THREE.Mesh(geoOf(o.geo),mat);m.castShadow=m.receiveShadow=true;m.userData.part=p;m.matrixAutoUpdate=false;world.add(m);m.updateMatrixWorld(true);p.meshes.push(m);parts.push(p);s.parts.push(p);return p}
+function genFemale(s){
+  const V=(x,y,z)=>new THREE.Vector3(x,y,z),R=r=>()=>[r,r];
+  // utérus : 7,5 cm, antéversé et antéfléchi ; col 2,7 cm, corps large de 5 cm au fond
+  const U=[V(0,.850,-.019),V(0,.8605,-.008),V(0,.8700,.0015),V(0,.8810,.022),V(0,.8898,.0444)];
+  const uR=t=>{if(t<.035){const k=Math.sqrt(t/.035);return[.0118*k+.0012,.0116*k+.0012]}if(t<.35)return[.0125,.0122];
+    const u=(t-.35)/.65,w=.0112+.0138*sm(0,.8,u),th=.0108+.0047*sm(0,.6,u),d=u>.84?Math.sqrt(Math.max(0,1-Math.pow((u-.84)/.16,2))):1;return[w*d+.0004,th*d+.0004]};
+  const UT=[['Vaginal part of cervix',0,.15,'Partie vaginale du col de l\'utérus','Portio vaginalis cervicis',0xdc9a90,"Segment du col qui fait saillie dans le vagin (« museau de tanche »), entouré par les culs-de-sac vaginaux (fornix). Il porte l'orifice externe du col, punctiforme chez la nullipare, en fente transversale après un accouchement. C'est la zone examinée au spéculum et prélevée lors du frottis."],
+   ['Supravaginal part of cervix',.15,.35,'Partie supravaginale du col de l\'utérus','Portio supravaginalis cervicis',0xd58f86,"Segment du col situé au-dessus de l'insertion du vagin. En avant, il répond à la base de la vessie ; latéralement au paramètre, où l'artère utérine croise l'uretère par en avant, à environ 1,5 cm du col ; en arrière au cul-de-sac recto-utérin (de Douglas). Les ligaments utéro-sacrés et cardinaux s'y fixent."],
+   ['Isthmus of uterus',.35,.43,'Isthme de l\'utérus','Isthmus uteri',0xcf877f,"Zone rétrécie d'environ 1 cm entre le corps et le col. Pendant la grossesse, il s'étire pour former le segment inférieur, où se fait l'incision de la césarienne. L'angle entre l'axe du corps et celui du col (antéflexion, environ 120°) s'y ouvre vers l'avant."],
+   ['Body of uterus',.43,.86,'Corps de l\'utérus','Corpus uteri',0xc97d76,"Partie principale de l'utérus, conique et aplatie d'avant en arrière. Sa face vésicale (antérieure) repose sur la vessie, sa face intestinale (postérieure) répond aux anses grêles et au côlon sigmoïde. Sa paroi comprend le périmétrium (péritoine), le myomètre (muscle lisse épais) et l'endomètre. Ses bords latéraux donnent attache au ligament large."],
+   ['Fundus of uterus',.86,1,'Fond de l\'utérus','Fundus uteri',0xc4766f,"Partie supérieure et arrondie du corps, située au-dessus de l'abouchement des trompes. À chaque angle latéral, la corne utérine reçoit la trompe, le ligament rond (en avant) et le ligament propre de l'ovaire (en arrière)."]];
+  for(const u of UT)genPart(s,{name:u[0],fr:u[3],la:u[4],color:u[5],info:u[6],geo:[sweep(U,uR,u[1],u[2],u[2]-u[1]>.3?30:14,40)]});
+  genPart(s,{name:'External os of uterus',fr:'Orifice externe du col de l\'utérus',la:'Ostium uteri',color:0x7a3a36,kind:0,info:"Ouverture du canal cervical dans le vagin, au sommet de la partie vaginale du col. Le canal cervical la relie à l'orifice interne, situé au niveau de l'isthme.",geo:[sweep([V(0,.8488,-.0203),V(0,.8496,-.0195)],R(.0032),0,1,2,18)]});
+  // vagin : conduit de 8 à 9 cm, aplati d'avant en arrière, oblique en bas et en avant
+  const VG=[V(0,.8555,-.0225),V(0,.842,-.012),V(0,.815,.008),V(0,.785,.032)];
+  const vR=t=>t<.13?[.0185-.004*sm(0,.13,t),.0142-.0092*sm(0,.13,t)]:[.0145-.003*sm(.6,1,t),.005];
+  genPart(s,{name:'Fornix of vagina',fr:'Fornix du vagin',la:'Fornix vaginae',color:0xc7837d,info:"Cul-de-sac annulaire formé par l'insertion du vagin autour du col. Sa partie postérieure est la plus profonde : elle n'est séparée du cul-de-sac recto-utérin (de Douglas) que par la paroi vaginale et le péritoine, ce qui permet la ponction ou l'abord chirurgical par cette voie.",geo:[sweep(VG,vR,0,.14,8,36)]});
+  genPart(s,{name:'Vagina',fr:'Vagin',la:'Vagina',color:0xc98a84,wiki:'Vagin',info:"Conduit musculo-membraneux de 8 à 9 cm, tendu du col de l'utérus au vestibule de la vulve, oblique en bas et en avant. Ses parois antérieure et postérieure sont accolées au repos ; la paroi antérieure (7 cm) est plus courte que la postérieure (9 cm). En avant : vessie puis urètre. En arrière : rectum, dont il est séparé par le septum recto-vaginal. Latéralement : muscle élévateur de l'anus.",geo:[sweep(VG,vR,.14,.94,30,36)]});
+  genPart(s,{name:'Vaginal orifice',fr:'Orifice vaginal',la:'Ostium vaginae',color:0xb9716c,info:"Ouverture inférieure du vagin dans le vestibule de la vulve, en arrière de l'ostium externe de l'urètre. Il est partiellement fermé par l'hymen ou ses vestiges (caroncules hyménéales).",geo:[sweep(VG,vR,.94,1,4,36)]});
+  genPart(s,{name:'Female urethra',fr:'Urètre féminin',la:'Urethra feminina',color:0xd9ab94,info:"Conduit court, de 3 à 4 cm, qui va du col de la vessie à l'ostium externe de l'urètre, situé dans le vestibule entre le clitoris et l'orifice vaginal. Il est accolé à la paroi antérieure du vagin. Sa brièveté explique la fréquence des infections urinaires chez la femme.",geo:[sweep([V(0,.833,.014),V(0,.815,.030),V(0,.795,.045)],R(.0032),0,1,12,14)]});
+  for(const sd of[-1,1]){const k=sd<0?'.r':'.l',M=(x,y,z)=>V(sd*x,y,z);
+    const TB=[M(.0235,.8865,.037),M(.034,.890,.030),M(.046,.896,.019),M(.058,.904,.003),M(.067,.910,-.018),M(.066,.914,-.038),M(.060,.905,-.052),M(.055,.892,-.053)];
+    const tR=t=>{const r=t<.3?.0017:t<.86?.0017+.0022*sm(.3,.6,t)+.0004*Math.sin(t*46):.004+.005*sm(.86,1,t);return[r,r]};
+    const T0=['Uterine tube','Trompe utérine','Tuba uterina'];
+    genPart(s,{name:'Uterine part of uterine tube'+k,fr:'Partie utérine de la trompe',la:'Pars uterina tubae uterinae',color:0xb8645e,kind:0,wiki:'Trompe utérine',info:"Segment interstitiel de la trompe, long d'environ 1 cm, qui traverse le myomètre au niveau de la corne utérine et s'ouvre dans la cavité utérine par l'ostium utérin. C'est la partie la plus étroite (moins de 1 mm). Il est visible ici en masquant ou en estompant le corps de l'utérus.",geo:[sweep([M(.008,.884,.033),M(.016,.8855,.035),M(.0235,.8865,.037)],R(.0013),0,1,8,12)]});
+    genPart(s,{name:'Isthmus of uterine tube'+k,fr:'Isthme de la trompe utérine',la:'Isthmus tubae uterinae',color:0xd6958b,wiki:'Trompe utérine',info:"Segment médial de la trompe, rectiligne, long de 3 à 4 cm, à paroi épaisse et lumière étroite. Il fait suite à la partie utérine et se continue par l'ampoule. C'est le site habituel de la ligature tubaire.",geo:[sweep(TB,tR,0,.3,16,16)]});
+    genPart(s,{name:'Ampulla of uterine tube'+k,fr:'Ampoule de la trompe utérine',la:'Ampulla tubae uterinae',color:0xd99c90,wiki:'Trompe utérine',info:"Segment le plus long (7 à 8 cm) et le plus large de la trompe, sinueux, à paroi mince. Il contourne le pôle supérieur de l'ovaire. La fécondation y a lieu le plus souvent, et c'est le siège le plus fréquent des grossesses extra-utérines.",geo:[sweep(TB,tR,.3,.86,34,18)]});
+    genPart(s,{name:'Infundibulum of uterine tube'+k,fr:'Infundibulum de la trompe utérine',la:'Infundibulum tubae uterinae',color:0xd78f85,wiki:'Trompe utérine',info:"Extrémité latérale de la trompe, en entonnoir (pavillon). Elle s'ouvre dans la cavité péritonéale par l'ostium abdominal, ce qui met en communication la cavité péritonéale et l'extérieur. Son bord est découpé en franges.",geo:[sweep(TB,tR,.86,1,10,20)]});
+    const fr=[],E=TB[7],D=V(-sd*.25,-.8,.55).normalize();
+    for(let i=0;i<11;i++){const a=i/11*Math.PI*2,rad=V(Math.cos(a),0,0).add(V(0,D.z,-D.y).multiplyScalar(Math.sin(a))).normalize(),b=E.clone().addScaledVector(rad,.0075),L=i===0?.02:.009+.004*((i*7)%3)/2;
+      const tip=i===0?M(.050,.876,-.038):b.clone().addScaledVector(D,L).addScaledVector(rad,.004);fr.push(sweep([b,b.clone().lerp(tip,.5).addScaledVector(rad,.002),tip],t=>{const r=.0016*(1-.75*t);return[r,r*.6]},0,1,8,8))}
+    genPart(s,{name:'Fimbriae of uterine tube'+k,fr:'Franges de la trompe utérine',la:'Fimbriae tubae uterinae',color:0xc66f67,wiki:'Trompe utérine',info:"Prolongements mobiles d'environ 1 à 1,5 cm qui bordent l'infundibulum. La plus longue, la frange ovarique, rejoint le pôle tubaire de l'ovaire. Au moment de l'ovulation, elles coiffent l'ovaire et captent l'ovocyte.",geo:fr});
+    // ovaire : 3,5 × 2 × 1 cm, dans la fosse ovarique, grand axe vertical
+    const sp=new THREE.SphereGeometry(1,30,20),sa=sp.attributes.position,op=[],C=M(.052,.888,-.034);
+    for(let i=0;i<sa.count;i++){const x=sa.getX(i),y=sa.getY(i),z=sa.getZ(i),bm=1+.07*Math.sin(x*7+1.3)*Math.sin(y*9+.4)*Math.sin(z*8+2.1);op.push(C.x+x*.0068*bm+sd*y*.002,C.y+y*.0172*bm,C.z+z*.0105*bm)}
+    genPart(s,{name:'Ovary'+k,fr:'Ovaire',la:'Ovarium',color:0xe9d6c6,rough:.42,kind:0,wiki:'Ovaire (anatomie)',info:"Gonade féminine, en forme d'amande d'environ 3,5 × 2 × 1 cm, située dans la fosse ovarique contre la paroi latérale du pelvis, en arrière du ligament large. Seul organe pelvien non recouvert de péritoine. Son pôle tubaire (supérieur) reçoit le ligament suspenseur, qui amène les vaisseaux ovariques ; son pôle utérin (inférieur) est relié à la corne utérine par le ligament propre de l'ovaire. Surface lisse avant la puberté, puis bosselée par les follicules et cicatricielle.",geo:[{pos:op,idx:[...sp.index.array]}]});
+    genPart(s,{name:'Ligament of ovary'+k,fr:'Ligament propre de l\'ovaire',la:'Ligamentum ovarii proprium',color:0xdccdb9,kind:5,info:"Cordon fibro-musculaire de 3 cm environ, tendu du pôle utérin de l'ovaire à la corne utérine, en arrière et en dessous de la trompe. Il soulève le feuillet postérieur du ligament large.",geo:[sweep([M(.0495,.8725,-.031),M(.040,.876,-.004),M(.0225,.882,.030)],R(.0016),0,1,16,10)]});
+    genPart(s,{name:'Suspensory ligament of ovary'+k,fr:'Ligament suspenseur de l\'ovaire',la:'Ligamentum suspensorium ovarii',color:0xd9c4ad,kind:5,info:"Repli péritonéal (ligament lombo-ovarien ou infundibulo-pelvien) qui relie le pôle tubaire de l'ovaire à la paroi pelvienne, au niveau du détroit supérieur. Il contient l'artère et la veine ovariques, des lymphatiques et des nerfs. L'uretère passe juste en dedans : c'est un point de danger chirurgical.",geo:[sweep([M(.054,.9045,-.036),M(.060,.925,-.036),M(.064,.955,-.034),M(.060,.99,-.028)],t=>[.0032-.0008*t,.0016],0,1,18,12)]});
+    genPart(s,{name:'Round ligament of uterus'+k,fr:'Ligament rond de l\'utérus',la:'Ligamentum teres uteri',color:0xdcc9b4,kind:5,info:"Cordon fibro-musculaire de 10 à 12 cm. Il naît de la corne utérine, en avant et en dessous de la trompe, se dirige en avant et en dehors sous le feuillet antérieur du ligament large, traverse le canal inguinal par l'anneau profond et se termine dans la grande lèvre. Il maintient l'antéversion de l'utérus.",geo:[sweep([M(.023,.8835,.040),M(.046,.890,.047),M(.072,.908,.054),M(.056,.878,.058),M(.036,.856,.060),M(.024,.812,.068)],R(.0019),0,1,40,10)]});
+    genPart(s,{name:'Uterosacral ligament'+k,fr:'Ligament utéro-sacré',la:'Ligamentum rectouterinum',color:0xd6c2aa,kind:5,info:"Bande fibreuse tendue de la face postérieure du col et de l'isthme au sacrum (S2 à S4), en contournant le rectum. Les deux ligaments limitent latéralement le cul-de-sac recto-utérin (de Douglas). Ils tirent le col en arrière et participent ainsi à l'antéversion. Ils contiennent des fibres du plexus hypogastrique inférieur.",geo:[sweep([M(.009,.8655,-.0125),M(.020,.870,-.035),M(.026,.884,-.060),M(.027,.905,-.079)],t=>[.003,.0012],0,1,20,12)]});
+    genPart(s,{name:'Cardinal ligament'+k,fr:'Ligament cardinal (transverse du col)',la:'Ligamentum cardinale',color:0xd2bca4,kind:5,info:"Lame fibreuse épaisse (ligament de Mackenrodt) à la base du ligament large, tendue du col et du fornix vaginal à la paroi latérale du pelvis. C'est le principal moyen de suspension de l'utérus. Il est traversé par l'artère utérine, qui y croise l'uretère par en avant.",geo:[sweep([M(.012,.861,-.006),M(.034,.862,-.013),M(.060,.866,-.022)],t=>[.0016,.0035+.003*t],0,1,14,12)]});
+    // ligament large : lame péritonéale entre le bord de l'utérus et la paroi pelvienne
+    const up=new THREE.CatmullRomCurve3([M(.022,.884,.036),M(.034,.888,.029),M(.046,.894,.018),M(.058,.902,.002),M(.066,.908,-.018)]),lo=new THREE.CatmullRomCurve3([M(.0135,.861,-.006),M(.036,.862,-.013),M(.062,.866,-.022)]),bp=[],bi=[],nu=22,nv=8,a=new THREE.Vector3(),b=new THREE.Vector3();
+    for(let i=0;i<=nu;i++){up.getPointAt(i/nu,a);lo.getPointAt(i/nu,b);for(let j=0;j<=nv;j++){const t=j/nv;bp.push(a.x+(b.x-a.x)*t,a.y+(b.y-a.y)*t-.0015,a.z+(b.z-a.z)*t+.004*Math.sin(t*Math.PI))}}
+    for(let i=0;i<nu;i++)for(let j=0;j<nv;j++){const q=i*(nv+1)+j;bi.push(q,q+nv+1,q+1,q+1,q+nv+1,q+nv+2)}
+    genPart(s,{name:'Broad ligament of uterus'+k,off:1,fr:'Ligament large de l\'utérus',la:'Ligamentum latum uteri',color:0xe3cdbf,kind:5,info:"Double feuillet de péritoine tendu du bord latéral de l'utérus à la paroi du pelvis. Il comprend le mésosalpinx (qui porte la trompe), le mésovarium (qui porte l'ovaire) et le mésomètre. Entre ses feuillets, le paramètre contient l'artère utérine, l'uretère et les ligaments rond et propre de l'ovaire. Masqué par défaut ici, car il recouvre les structures voisines : clique dessus dans la liste pour l'afficher.",geo:[{pos:bp,idx:bi}]})}
+}
 // ------------------------------------------------------------------ démarrage
 SYS.forEach(sysRow);
 $$('#optList button').forEach(b=>{const k=b.dataset.opt;b.classList.toggle('on',!!OPT[k]);b.onclick=()=>{if(Q.on)return;OPT[k]=!OPT[k];LS.set('opt',OPT);b.classList.toggle('on',OPT[k]);
@@ -770,7 +898,8 @@ $$('#optList button').forEach(b=>{const k=b.dataset.opt;b.classList.toggle('on',
 if(innerWidth<900)leftOpen(false);
 (async()=>{
   try{CAT=await (await fetch('data/catalog.json')).json()}catch(e){$('#splashMsg').className='err';$('#splashMsg').textContent="Données introuvables (data/catalog.json). Lance l'appli avec « Lancer l'atlas.command ».";return}
-  indexCatalog();requestAnimationFrame(loop);
+  if(SEX==='f')for(const k in CAT.landmarks)for(const L of CAT.landmarks[k]){_wv.set(L.p[0],L.p[1],L.p[2]);warpF(_wv);L.p=[_wv.x,_wv.y,_wv.z]}
+  indexCatalog();viewsPane();requestAnimationFrame(loop);
   try{await setSys(SYSID.squelette,true)}catch{}
   if(SYSID.squelette.state!=='ready'){$('#splashMsg').className='err';$('#splashMsg').textContent="Modèle introuvable : le dossier « export » doit se trouver à côté du dossier « atlas ».";return}
   const b=visibleBox(),c=b.getCenter(new THREE.Vector3());controls.target.copy(c);camera.position.set(c.x,c.y,c.z+b.getSize(new THREE.Vector3()).length()/2/Math.sin(THREE.MathUtils.degToRad(15))*1.18/Math.min(1,camera.aspect*.8));

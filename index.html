@@ -59,6 +59,9 @@ button.on kbd{color:inherit;border-color:currentColor;opacity:.7}
 .pane{display:none;flex:1;min-height:0;padding:10px 12px 12px}.pane.on{display:block}
 #pane-explore.on{display:flex;flex-direction:column}#sysBox{flex:none}#tree{flex:1;min-height:0}
 #sysList{display:grid;grid-template-columns:1fr 1fr;gap:1px 4px}#optList{margin:6px 0 0}#optList button{font-size:12px;padding:4px 6px}
+.hrow{display:flex;align-items:center;justify-content:space-between}.hrow .seg{flex:none;text-transform:none;letter-spacing:0}.hrow .seg button{font-size:11.5px;padding:2px 9px;min-height:0;color:var(--tx)}.hrow .seg button.on{color:var(--accInk)}
+.vgrid{display:grid;grid-template-columns:1fr 1fr;gap:5px}.vgrid button{text-align:left;padding:8px 10px;font-size:12.5px}
+#exPop label{display:flex;align-items:center;gap:8px;font-size:12.5px;color:var(--mut);white-space:nowrap}#exHint{flex-basis:100%;text-align:center;font-size:11.5px}
 h3{font-size:11px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--mut);margin:14px 4px 6px}
 h3:first-child{margin-top:2px}
 .sys{display:flex;align-items:center;gap:8px;width:100%;min-width:0;text-align:left;border:0;border-radius:10px;padding:6px 7px;font-size:12.5px;position:relative;overflow:hidden}
@@ -120,7 +123,7 @@ body{--L:340px;--C:calc(var(--L) + (100vw - var(--L))/2)}body.noleft{--L:0px}
 #bar .sep{width:1px;height:20px;background:var(--line);margin:0 3px}
 #clipPop,#exPop{left:var(--L);right:0;margin-inline:auto;width:max-content;bottom:66px;padding:10px 12px;display:none;gap:10px;align-items:center;max-width:calc(100vw - var(--L) - 24px);flex-wrap:wrap;justify-content:center}
 #clipPop.on,#exPop.on{display:flex}
-#clipPop input[type=range],#exPop input[type=range]{width:200px;accent-color:var(--acc)}#exPop .seg button{white-space:nowrap;padding:5px 10px}
+#clipPop input[type=range],#exPop input[type=range]{width:150px;accent-color:var(--acc)}#exPop .seg button{white-space:nowrap;padding:5px 10px}
 #menuBtn{position:fixed;left:12px;top:12px;display:none;z-index:3}
 #left.closed~#menuBtn{display:block}
 
@@ -197,12 +200,13 @@ select option{color:#111}
     <input id="search" type="search" placeholder="Rechercher une structure, un relief…  ( / )" autocomplete="off">
     <div id="results" class="scroll"></div>
   </div>
-  <div class="tabs"><button data-tab="explore" class="on">Explorer</button><button data-tab="quiz">Quiz</button></div>
+  <div class="tabs"><button data-tab="explore" class="on">Explorer</button><button data-tab="views">Vues</button><button data-tab="quiz">Quiz</button></div>
   <div id="pane-explore" class="pane on">
-    <div id="sysBox"><h3>Systèmes</h3><div id="sysList"></div>
+    <div id="sysBox"><h3 class="hrow">Systèmes<span class="seg" id="sexSeg"><button data-sex="m">Homme</button><button data-sex="f">Femme</button></span></h3><div id="sysList"></div>
     <div class="seg" id="optList"><button data-opt="Fascia" title="Afficher aussi les fascias">+ Fascias</button><button data-opt="Bursa" title="Afficher aussi les bourses synoviales">+ Bourses</button></div></div>
     <h3>Structures</h3><div id="tree" class="scroll"></div>
   </div>
+  <div id="pane-views" class="pane scroll"></div>
   <div id="pane-quiz" class="pane scroll"></div>
 </aside>
 <button id="menuBtn" class="panel" style="position:fixed">☰</button>
@@ -228,9 +232,9 @@ select option{color:#111}
   <span class="sep"></span><button id="quizBtn" title="Ouvrir les quiz">Quiz</button>
 </div>
 <div id="exPop" class="panel">
-  <div class="seg" id="exScope"><button data-s="all" class="on">Toute la vue</button><button data-s="sel">Autour de la sélection</button></div>
-  <input id="exPos" type="range" min="0" max="100" value="45" title="Écartement">
-  <button id="exClose">Fermer</button>
+  <label>Écartement <input id="exPos" type="range" min="0" max="100" value="0"></label>
+  <label>Rayon de la zone <input id="exRad" type="range" min="4" max="40" value="12"></label>
+  <button id="exClose">Fermer</button><div id="exHint" class="mut"></div>
 </div>
 <div id="topR" class="panel"><button id="helpBtn" title="Aide et raccourcis (?)">?</button><button id="theme" title="Thème clair / sombre">◐</button><button id="setBtn" title="Réglages">⚙ Réglages</button></div>
 <aside id="help" class="panel"><div id="setHead"><b>Aide</b><button id="helpClose" class="ghost">×</button></div><div id="helpBody" class="scroll"><table>
@@ -258,6 +262,6 @@ select option{color:#111}
 window.addEventListener('error',e=>{const m=document.getElementById('splashMsg');if(m&&document.getElementById('splash').style.opacity!=='0'){m.className='err';
   m.textContent=location.protocol==='file:'?"Ouvre l'appli avec « Lancer l'atlas.command » (double-clic), pas en ouvrant index.html directement.":'Erreur de chargement : '+(e.message||'réseau')}} ,true);
 </script>
-<script type="module" src="app.js?v=17"></script>
+<script type="module" src="app.js?v=19"></script>
 </body>
 </html>
