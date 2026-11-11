@@ -98,7 +98,7 @@ let fullDpr=dprFor(),curDpr=fullDpr,moving=false,slow=0,lastT=0,restoreTimer=0;
 controls.addEventListener('start',()=>{moving=true;clearTimeout(restoreTimer);hideTip()});
 controls.addEventListener('end',()=>{moving=false;restoreTimer=setTimeout(()=>{renderer.shadowMap.autoUpdate=true;renderer.shadowMap.needsUpdate=true;invalidate();if(curDpr!==fullDpr){curDpr=fullDpr;renderer.setPixelRatio(curDpr);resize()}},260)});
 let booted=false;
-function resize(){const w=innerWidth,h=innerHeight;renderer.setPixelRatio(curDpr);renderer.setSize(w,h,false);if(camera.view)camera.clearViewOffset();camera.aspect=w/h;camera.updateProjectionMatrix();invalidate();if(booted)sheetOffset()}
+function resize(){const w=innerWidth,h=innerHeight;if(!w||!h)return;renderer.setPixelRatio(curDpr);renderer.setSize(w,h,false);if(camera.view)camera.clearViewOffset();camera.aspect=w/h;camera.updateProjectionMatrix();invalidate();if(booted)sheetOffset()}
 addEventListener('resize',resize);resize();
 
 // zoom molette / trackpad : proportionnel au geste, centré sur le curseur
@@ -902,6 +902,7 @@ if(innerWidth<900)leftOpen(false);
   indexCatalog();viewsPane();requestAnimationFrame(loop);
   try{await setSys(SYSID.squelette,true)}catch{}
   if(SYSID.squelette.state!=='ready'){$('#splashMsg').className='err';$('#splashMsg').textContent="Modèle introuvable : le dossier « export » doit se trouver à côté du dossier « atlas ».";return}
+  if(!innerWidth||!innerHeight)await new Promise(r=>{const f=()=>{if(innerWidth&&innerHeight){removeEventListener('resize',f);r()}};addEventListener('resize',f)});resize();
   const b=visibleBox(),c=b.getCenter(new THREE.Vector3());controls.target.copy(c);camera.position.set(c.x,c.y,c.z+b.getSize(new THREE.Vector3()).length()/2/Math.sin(THREE.MathUtils.degToRad(15))*1.18/Math.min(1,camera.aspect*.8));
   ground.position.set(c.x,b.min.y-.002,c.z);ground.userData.ready=true;applyCfg();
   invalidate();const sp=$('#splash');sp.style.opacity=0;setTimeout(()=>sp.remove(),520);
