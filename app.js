@@ -720,7 +720,7 @@ function leftOpen(o){$('#left').classList.toggle('closed',!o);document.body.clas
 $('#closeLeft').onclick=()=>leftOpen(false);$('#menuBtn').onclick=()=>leftOpen(true);
 function toggleHelp(f){const h=$('#help');h.classList.toggle('on',f===undefined?!h.classList.contains('on'):f);$('#helpBtn').classList.toggle('on',h.classList.contains('on'))}
 $('#helpBtn').onclick=()=>toggleHelp();$('#helpClose').onclick=()=>toggleHelp(false);
-$$('.tabs button').forEach(b=>b.onclick=()=>{$$('.tabs button').forEach(x=>x.classList.toggle('on',x===b));$$('.pane').forEach(p=>p.classList.toggle('on',p.id==='pane-'+b.dataset.tab));if(b.dataset.tab==='quiz')quizPane()});
+$$('.tabs button').forEach(b=>b.onclick=()=>{if(b.dataset.tab==='atlas'||b.dataset.tab==='quiz'){navOpen(b.dataset.tab);return}$$('.tabs button').forEach(x=>x.classList.toggle('on',x===b));$$('.pane').forEach(p=>p.classList.toggle('on',p.id==='pane-'+b.dataset.tab));if(b.dataset.tab==='quiz')quizPane()});
 addEventListener('keydown',e=>{
   if((e.target.matches&&e.target.matches('input,textarea,select'))||e.metaKey||e.ctrlKey&&e.key!=='z')return;const k=e.key.toLowerCase();
   if(NAV.on){if(k==='escape')navBack();return}
@@ -957,7 +957,7 @@ const NSYS=[['squelette','Os · système squelettique'],['articulations','Articu
 const NREG=[['tc','Tête et cou'],['tr','Tronc'],['ms','Membre supérieur'],['mi','Membre inférieur']];
 function regOf(p){if(p.sys.id==='squelette'){const g=boneGroup(p.en);return g==='crane'?'tc':g==='msup'?'ms':g==='minf'?'mi':/^(Atlas|Axis|Vertebra C)/.test(p.base)?'tc':'tr'}
   pbox(p);const c=p.center,ax=Math.abs(c.x);if(c.y>1.43&&ax<.14)return'tc';if(ax>.2||(ax>.15&&c.y>.95&&c.y<1.43&&p.radius<.2))return'ms';if(c.y<.84)return'mi';return'tr'}
-const regParts=(s,r)=>s.parts.filter(p=>!p.ins&&!defHidden(p)&&regOf(p)===r);
+const regParts=(s,r)=>s.parts.filter(p=>!p.ins&&!defHidden(p)&&regOf(p)===r&&!((r==='ms'||r==='mi')&&p.side==='l'));
 // vignettes : rendu hors écran de la structure, mis en cache
 const TH=new Map(),thQ=[];let thRT=null,thBusy=false;const thCam=new THREE.PerspectiveCamera(26,1,.01,20);
 function thumb(key,ps,img){if(TH.has(key)){img.src=TH.get(key);return}thQ.push([key,ps,img]);if(!thBusy){thBusy=true;setTimeout(thRun,30)}}
@@ -985,7 +985,9 @@ function navOpen(mode){if(Q.on||PQ.on)return;if(mode)NAV.mode=mode;NAV.on=true;N
 function navPush(pg){const cur=NAV.stack[NAV.stack.length-1];if(cur)cur.sc=$('#navBody').scrollTop;NAV.stack.push(pg);navRender()}
 function navBack(){NAV.stack.pop();NAV.q='';$('#navSearch').value='';navRender()}
 function navClose(){NAV.stack=[];navRender()}
-function pageHome(){return{t:NAV.mode==='quiz'?'Quiz':'Atlas d\'anatomie',secs:NSYS.map(([id,lab])=>{const s=SYSID[id];return{t:lab,cards:NREG.map(([r,rl])=>({t:rl,k:id+'|'+r,ps:s.state==='ready'?regParts(s,r):null,col:'#'+new THREE.Color(s.color).getHexString(),go:async()=>{toast('Chargement…');try{await loadSys(s)}catch{return}navPush(pageRegion(s,r,rl))}}))}})}}
+function pageHome(){const extra=NAV.mode==='quiz'?[{t:'Autres quiz',cards:MODES.map(m=>({t:m[1],sub:m[2],col:'var(--panel3)',go:()=>{navClose();Q.mode=m[0];quizStart()}}))}]
+   :VIEWS.slice(0,1).concat(VIEWS.slice(2)).map(g=>({t:g[0],cards:g[1].map(v=>({t:v[0],col:'var(--panel3)',go:()=>{navClose();applyView(v)}}))})).concat([{t:'Mes vues',cards:MYV.map(v=>({t:v.n,col:'var(--panel3)',go:()=>{navClose();loadView(v)}})).concat([{t:'+ Enregistrer la vue actuelle',col:'var(--panel3)',go:()=>{saveView();navClose()}}])}]);
+  return{t:NAV.mode==='quiz'?'Quiz':'Atlas d\'anatomie',secs:NSYS.map(([id,lab])=>{const s=SYSID[id];return{t:lab,cards:NREG.map(([r,rl])=>({t:rl,k:id+'|'+r,ps:s.state==='ready'?regParts(s,r):null,col:'#'+new THREE.Color(s.color).getHexString(),go:async()=>{toast('Chargement…');try{await loadSys(s)}catch{return}navPush(pageRegion(s,r,rl))}}))}}).concat(extra)}}
 function uniq(ps){const m=new Map();for(const p of ps){if(p.side==='l')continue;if(!m.has(p.base))m.set(p.base,p)}return[...m.values()].sort((a,b)=>title(a).localeCompare(title(b),'fr'))}
 const chunks=(a,n)=>{const o=[];for(let i=0;i<a.length;i+=n)o.push(a.slice(i,i+n));if(o.length>1&&o[o.length-1].length<4)o[o.length-2].push(...o.pop());return o};
 function pageRegion(s,r,rl){const ps=regParts(s,r),us=uniq(ps),bone=s.id==='squelette',secs=[];
@@ -1005,28 +1007,34 @@ function viewPart(s,p,ctx,mode){pushUndo();showSet(s,mode==='ctx'?ctx:[p]);navCl
 // quiz à pastilles : toutes les pastilles sont affichées, on clique celle du nom demandé
 function pqStart(def){navClose();PQ.def=def;PQ.snap=PQ.on?PQ.snap:snap();PQ.cam=PQ.on?PQ.cam:[camera.position.clone(),controls.target.clone()];pqClear();
   const s=def.sys,dir=new THREE.Vector3(0,.1,1).normalize(),rcq=new THREE.Raycaster();rcq.firstHitOnly=true;PQ.items=[];
-  if(def.bone){showSet(s,[def.bone]);openLm(def.bone);const L=LM.list.slice();closeLm();for(const i of def.lm)PQ.items.push({fr:L[i].fr||L[i].en,la:L[i].la,pos:L[i].s.clone().addScaledVector(L[i].n,.001),part:def.bone})}
-  else{showSet(s,def.ctx);for(const p of def.parts){pbox(p);const o=p.center.clone().addScaledVector(dir,p.radius+.3);rcq.set(o,dir.clone().negate());const h=rcq.intersectObjects(p.meshes,false)[0];PQ.items.push({fr:title(p),la:p.la,pos:h?h.point.clone().addScaledVector(dir,.001):p.center.clone(),part:p})}}
-  const tex=pinTex('#ffffff','');PQ.pins=PQ.items.map((it,i)=>{const sp=new THREE.Sprite(new THREE.SpriteMaterial({map:tex,depthTest:false,depthWrite:false,sizeAttenuation:false,transparent:true}));sp.position.copy(it.pos);sp.renderOrder=30;sp.userData.i=i;sp.scale.setScalar(.02*CFG.pin*THREE.MathUtils.clamp(camera.aspect*1.1,.6,1));pinG.add(sp);return sp});
+  if(def.bone){showSet(s,[def.bone]);openLm(def.bone);const L=LM.list.slice();closeLm();for(const i of def.lm)PQ.items.push({fr:L[i].fr||L[i].en,la:L[i].la,pos:L[i].s.clone().addScaledVector(L[i].n,.001),part:def.bone,css:L[i].css});
+    LMU.uLmSel.value=-1;for(const m of def.bone.meshes){m.material.userData.halo=true;m.material.needsUpdate=true}PQ.haloB=def.bone}
+  else{showSet(s,def.ctx);for(const p of def.parts){pbox(p);const o=p.center.clone().addScaledVector(dir,p.radius+.3);rcq.set(o,dir.clone().negate());const h=rcq.intersectObjects(p.meshes,false)[0];PQ.items.push({fr:title(p),la:p.la,pos:h?h.point.clone().addScaledVector(dir,.001):p.center.clone(),part:p})}
+    PQ.tinted=[];def.ctx.filter(p=>p.side!=='l'||true).forEach(p=>{const k=hash(p.base)%360,c=new THREE.Color().setHSL(((k*137.508)%360)/360,.42,.6,THREE.SRGBColorSpace);for(const m of p.meshes){const u=m.material.userData;if(/Cartilage|Teeth|Tendon/.test(p.mat)&&p.meshes.length>1)continue;u.base0=u.base0||u.base.clone();u.base.copy(c)}PQ.tinted.push(p);apply(p)})}
+  PQ.pins=PQ.items.map((it,i)=>{const sp=new THREE.Sprite(new THREE.SpriteMaterial({map:pqTex(it.css||'#ffffff'),depthTest:false,depthWrite:false,sizeAttenuation:false,transparent:true}));sp.position.copy(it.pos);sp.renderOrder=30;sp.userData.i=i;sp.scale.setScalar(.02*CFG.pin*THREE.MathUtils.clamp(camera.aspect*1.1,.6,1));pinG.add(sp);return sp});
   PQ.on=true;PQ.ok=PQ.ko=0;PQ.queue=shuffle(PQ.items.map((_,i)=>i));PQ.started=false;document.body.classList.add('inpq');$('#card').classList.remove('on');
-  const b=new THREE.Box3();PQ.items.forEach(it=>b.expandByPoint(it.pos));def.bone?flyTo(def.bone.center,def.bone.radius*1.1,new THREE.Vector3(0,0,1)):flyTo(b.getCenter(new THREE.Vector3()),Math.max(b.getSize(new THREE.Vector3()).length()/2*1.15,.1),new THREE.Vector3(0,0,1));pqPaint()}
-function pqClear(){for(const sp of PQ.pins){pinG.remove(sp);sp.material.dispose()}PQ.pins=[]}
+  const b=new THREE.Box3();if(def.ctx)def.ctx.forEach(p=>b.union(pbox(p)));else PQ.items.forEach(it=>b.expandByPoint(it.pos));def.bone?flyTo(def.bone.center,def.bone.radius*1.1,new THREE.Vector3(0,0,1)):flyTo(b.getCenter(new THREE.Vector3()),Math.max(b.getSize(new THREE.Vector3()).length()/2*1.15,.1),new THREE.Vector3(0,0,1));pqPaint()}
+function pqTex(css){const c=document.createElement('canvas');c.width=c.height=64;const x=c.getContext('2d');x.beginPath();x.arc(32,32,23,0,7);x.fillStyle=css;x.fill();x.lineWidth=8;x.strokeStyle='#0b1114';x.stroke();
+  x.beginPath();x.arc(32,32,26.5,0,7);x.lineWidth=2;x.strokeStyle='rgba(255,255,255,.85)';x.stroke();const t=new THREE.CanvasTexture(c);t.colorSpace=THREE.SRGBColorSpace;return t}
+function pqClear(){for(const sp of PQ.pins){pinG.remove(sp);sp.material.map.dispose();sp.material.dispose()}PQ.pins=[];
+  for(const p of PQ.tinted||[])for(const m of p.meshes)if(m.material.userData.base0){m.material.userData.base.copy(m.material.userData.base0);m.material.userData.base0=null}
+  if(PQ.haloB){for(const m of PQ.haloB.meshes){m.material.userData.halo=false;m.material.needsUpdate=true}PQ.haloB=null}(PQ.tinted||[]).forEach(apply);PQ.tinted=[]}
 function pqPaint(end){const el=$('#pq'),d=PQ.def,n=PQ.items.length;el.classList.add('on');
   if(end){const pc=Math.round(PQ.ok/(PQ.ok+PQ.ko)*100);el.innerHTML=`<div class="pqT">${esc(d.title)}</div><div class="score" style="color:${pc>=80?'var(--ok)':pc>=50?'var(--gold)':'var(--ko)'}">${pc} %</div><div class="mut">${PQ.ok} justes · ${PQ.ko} erreur${PQ.ko>1?'s':''} · meilleur score ${PQB[d.id]} %</div><div class="pqB"><button class="on" data-p="again">Recommencer</button><button data-p="nav">Autres quiz</button><button data-p="quit">Quitter</button></div>`;return}
-  if(!PQ.started){el.innerHTML=`<div class="pqT">${esc(d.title)}</div><div class="mut">${n} pastilles · clique celle qui correspond au nom affiché. Tu peux tourner et zoomer.</div><div class="pqB"><button class="on" data-p="go">Prêt · commencer le quiz</button><button data-p="quit">Quitter</button></div>`;return}
-  const it=PQ.items[PQ.queue[0]];el.innerHTML=`<div class="pqQ"><b>${esc(it.fr)}</b>${LA(it.la)?`<span class="la">${esc(it.la)}</span>`:''}</div><div class="pqS"><span class="ok">✓ ${PQ.ok}</span><span class="ko">✗ ${PQ.ko}</span><span class="mut">${PQ.queue.length} restantes</span><button data-p="reset" title="Recommencer ce quiz">↺</button><button data-p="quit">Quitter</button></div>`}
+  if(!PQ.started){el.innerHTML=`<div class="pqT">${esc(d.title)}</div><div class="mut">${n} pastilles · clique celle qui correspond au nom affiché. Tu peux tourner et zoomer.</div><div class="pqB"><button class="on" data-p="go">Prêt · commencer le quiz !</button></div>`;return}
+  const it=PQ.items[PQ.queue[0]];el.innerHTML=`<div class="pqQ"><b>${esc(it.fr)}</b>${LA(it.la)?`<span class="la">${esc(it.la)}</span>`:''}</div><div class="pqS"><span class="ok">✓ ${PQ.ok}</span><span class="ko">✗ ${PQ.ko}</span><span class="mut">${PQ.queue.length} restantes</span></div>`}
 function pqClick(h){if(!PQ.started||!h||h.pq===undefined||!PQ.queue.length)return;const want=PQ.queue[0],sp=PQ.pins[h.pq];
   if(h.pq===want){PQ.ok++;sp.visible=false;PQ.queue.shift();const p=PQ.items[want].part;if(!PQ.def.bone){p.flash=1;apply(p);setTimeout(()=>{p.flash=0;apply(p)},500)}}
   else{PQ.ko++;sp.material.color.set(0xff6050);setTimeout(()=>{sp.material.color.set(0xffffff);invalidate()},450);PQ.queue.push(PQ.queue.shift());toast('Non : c\'était « '+PQ.items[h.pq].fr+' »')}
   invalidate();if(!PQ.queue.length){const pc=Math.round(PQ.ok/(PQ.ok+PQ.ko)*100);PQB[PQ.def.id]=Math.max(PQB[PQ.def.id]||0,pc);LS.set('pq',PQB);pqPaint(true)}else pqPaint()}
 function pqQuit(toNav){pqClear();PQ.on=false;document.body.classList.remove('inpq');$('#pq').classList.remove('on');parts.forEach(p=>p.flash=0);if(PQ.snap)restore(PQ.snap);
   if(PQ.cam)tw={t0:performance.now(),ms:500,p0:camera.position.clone(),p1:PQ.cam[0],q0:controls.target.clone(),q1:PQ.cam[1]};invalidate();if(toNav)navOpen('quiz')}
+$('#pqTop').addEventListener('click',e=>{const b=e.target.closest('[data-p]');if(!b)return;if(b.dataset.p==='quit')pqQuit(true);else pqStart(PQ.def)});
 $('#pq').addEventListener('click',e=>{const b=e.target.closest('[data-p]');if(!b)return;const a=b.dataset.p;if(a==='go'){PQ.started=true;pqPaint()}else if(a==='quit')pqQuit();else if(a==='nav')pqQuit(true);else pqStart(PQ.def)});
 $('#navBody').addEventListener('click',e=>{const b=e.target.closest('.ncard');if(b)NAV.cards[+b.dataset.i].go()});
 $('#navBackBtn').onclick=()=>NAV.stack.length>1?navBack():navClose();$('#navClose').onclick=navClose;$('#navGrid').onclick=()=>{NAV.grid=!NAV.grid;LS.set('navgrid',NAV.grid);navRender()};
 $('#navSearch').oninput=e=>{NAV.q=e.target.value;navRender()};$('#navSearch').addEventListener('keydown',e=>e.stopPropagation());
 $$('#navTabs button').forEach(b=>b.onclick=()=>{NAV.mode=b.dataset.m;const d=NAV.stack.length;NAV.stack=[];navPush(pageHome())});
-$('#navBtn').onclick=()=>navOpen();
 // ------------------------------------------------------------------ démarrage
 SYS.forEach(sysRow);
 $$('#optList button').forEach(b=>{const k=b.dataset.opt;b.classList.toggle('on',!!OPT[k]);b.onclick=()=>{if(Q.on)return;OPT[k]=!OPT[k];LS.set('opt',OPT);b.classList.toggle('on',OPT[k]);
