@@ -956,7 +956,7 @@ const NAV={on:false,mode:'atlas',stack:[],grid:LS.get('navgrid',true),q:''},PQ={
 const NSYS=[['squelette','Os · système squelettique'],['articulations','Articulations · système articulaire'],['muscles','Muscles'],['vaisseaux','Cœur et vaisseaux'],['nerfs','Système nerveux'],['visceres','Viscères']];
 const NREG=[['tc','Tête et cou'],['tr','Tronc'],['ms','Membre supérieur'],['mi','Membre inférieur']];
 function regOf(p){if(p.sys.id==='squelette'){const g=/trapezoid/i.test(p.en)?'msup':boneGroup(p.en);return g==='crane'?'tc':g==='msup'?'ms':g==='minf'?'mi':/^(Atlas|Axis|Vertebra C)/.test(p.base)?'tc':'tr'}
-  pbox(p);const c=p.center,ax=Math.abs(c.x);if(c.y>1.43&&ax<.14)return'tc';if(ax>.2||(ax>.15&&c.y>.95&&c.y<1.43&&p.radius<.2))return'ms';if(c.y<.84)return'mi';return'tr'}
+  pbox(p);const c=p.center,ax=Math.abs(c.x);if(p.sys.id==='visceres')return c.y>1.43?'tc':'tr';if(c.y>1.43&&ax<.14)return'tc';if(ax>.2||(ax>.15&&c.y>.95&&c.y<1.43&&p.radius<.2))return'ms';if(c.y<.84)return'mi';return'tr'}
 function catOf(p,r){const n=p.base.toLowerCase();
   if(r==='tc')return/tooth|incisor|canine|molar|premolar/.test(n)?'Dents':/vertebra|atlas|axis/.test(n)?'Vertèbres cervicales':/cartilage|hyoid/.test(n)?'Larynx, os hyoïde et cartilages':'Os du crâne et de la face';
   if(r==='tr')return/costal cartilage/.test(n)?'Cartilages costaux':/vertebra|sacrum|coccyx/.test(n)?'Colonne vertébrale':'Côtes et sternum';
@@ -965,12 +965,15 @@ function catOf(p,r){const n=p.base.toLowerCase();
 function colKey(p){const n=p.base.toLowerCase();if(/costal cartilage/.test(n))return'cc';if(/\brib\b/.test(n))return'rib';if(/tooth|incisor|canine|molar|premolar/.test(n))return'tooth';if(/metacarp/.test(n))return'mc';if(/metatars/.test(n))return'mt';
   if(/phalanx/.test(n))return/proximal/.test(n)?'ph1':/middle/.test(n)?'ph2':'ph3';const v=n.match(/vertebra ([ctl])/);if(v)return'v'+v[1];if(/atlas|axis/.test(n))return'vc';return n}
 const QPAL=[0xe8b4a0,0x9fc7e8,0xb9dba0,0xe6d28c,0xcfa8e0,0x8fd6c8,0xf0a8b8,0xa8b4ec,0xdcc0a0,0x9ad0a8,0xe4a070,0xc0c8d0,0xd8e08c,0xb0a0d8,0x80c0d8,0xe890a0];
+function nearBones(ps,pad=.025){const b=new THREE.Box3(),left=ps.every(p=>p.side==='l');ps.forEach(p=>b.union(pbox(p)));b.expandByScalar(pad);
+  return SYSID.squelette.parts.filter(q=>!defHidden(q)&&pbox(q).intersectsBox(b)&&!(ps.every(p=>p.side==='r')&&q.side==='l')&&!(left&&q.side==='r'))}
+const BANDS={tc:[['Tête',1.5],['Cou',-9]],tr:[['Thorax',1.12],['Abdomen et région lombaire',.98],['Pelvis',-9]],ms:[['Épaule et bras',1.17],['Coude et avant-bras',.9],['Poignet et main',-9]],mi:[['Hanche et cuisse',.5],['Genou et jambe',.12],['Cheville et pied',-9]]};
 const regParts=(s,r)=>s.parts.filter(p=>!p.ins&&!defHidden(p)&&regOf(p)===r&&!((r==='ms'||r==='mi')&&p.side==='l'));
 // vignettes : rendu hors écran de la structure, mis en cache
-const THS=LS.get('th3',{}),TH=new Map(Object.entries(THS)),thQ=[];let thRT=null,thBusy=false;const thCam=new THREE.PerspectiveCamera(26,1,.01,20);
-function thumb(key,ps,img){if(TH.has(key)){img.src=TH.get(key);return}thQ.push([key,ps,img]);if(!thBusy){thBusy=true;setTimeout(thRun,30)}}
-function thRun(){const job=thQ.shift();if(!job){thBusy=false;return}const [key,ps,img]=job;
-  if(!TH.has(key)&&ps.length){const N=176;thRT=thRT||new THREE.WebGLRenderTarget(N,N,{colorSpace:THREE.SRGBColorSpace});const set=new Set(ps),sv=[],bx=new THREE.Box3();
+const THS=LS.get('th5',{}),TH=new Map(Object.entries(THS)),thQ=[];let thRT=null,thBusy=false;const thCam=new THREE.PerspectiveCamera(26,1,.01,20);
+function thumb(key,ps,img,ctx){if(TH.has(key)){img.src=TH.get(key);return}thQ.push([key,ps,img,ctx]);if(!thBusy){thBusy=true;setTimeout(thRun,30)}}
+function thRun(){const job=thQ.shift();if(!job){thBusy=false;return}const [key,ps,img,ctx]=job;
+  if(!TH.has(key)&&ps.length){const N=176;thRT=thRT||new THREE.WebGLRenderTarget(N,N,{colorSpace:THREE.SRGBColorSpace});const set=new Set(ctx?ps.concat(ctx):ps),sv=[],bx=new THREE.Box3();
     for(const p of parts)for(const m of p.meshes){sv.push(m,m.visible,m.material.transparent,m.material.opacity);m.visible=set.has(p);if(m.visible){m.material.transparent=false;m.material.opacity=1}}
     ps.forEach(p=>bx.union(pbox(p)));const c=bx.getCenter(new THREE.Vector3()),sz=bx.getSize(new THREE.Vector3()),r=Math.max(sz.y,Math.hypot(sz.x,sz.z))/2*1.08,d=new THREE.Vector3(ps.length>1?.45:.25,.1,1).normalize();
     thCam.position.copy(c).addScaledVector(d,r/Math.sin(13*Math.PI/180)*1.02);thCam.lookAt(c);thCam.near=.01;thCam.far=30;thCam.updateProjectionMatrix();thCam.updateMatrixWorld();
@@ -978,7 +981,7 @@ function thRun(){const job=thQ.shift();if(!job){thBusy=false;return}const [key,p
     for(const L of[sun,sun2]){L.position.copy(c).add(new THREE.Vector3(-.5,.72,.62).applyQuaternion(thCam.quaternion).multiplyScalar(3));L.target.position.copy(c);L.target.updateMatrixWorld();L.updateMatrixWorld()}
     renderer.setRenderTarget(thRT);renderer.setClearColor(0,0);renderer.clear();renderer.render(scene,thCam);const px=new Uint8Array(N*N*4);renderer.readRenderTargetPixels(thRT,0,0,N,N,px);renderer.setRenderTarget(null);
     pinG.visible=pv;capG.visible=cv;ground.visible=gv;renderer.clippingPlanes=cl;for(let i=0;i<sv.length;i+=4){sv[i].visible=sv[i+1];sv[i].material.transparent=sv[i+2];sv[i].material.opacity=sv[i+3]}
-    const cvs=document.createElement('canvas');cvs.width=cvs.height=N;const x=cvs.getContext('2d'),im=x.createImageData(N,N);for(let y=0;y<N;y++)im.data.set(px.subarray((N-1-y)*N*4,(N-y)*N*4),y*N*4);x.putImageData(im,0,0);TH.set(key,cvs.toDataURL());if(/^[a-z]+\|(tc|tr|ms|mi)$/.test(key)){THS[key]=TH.get(key);LS.set('th3',THS)}invalidate()}
+    const cvs=document.createElement('canvas');cvs.width=cvs.height=N;const x=cvs.getContext('2d'),im=x.createImageData(N,N);for(let y=0;y<N;y++)im.data.set(px.subarray((N-1-y)*N*4,(N-y)*N*4),y*N*4);x.putImageData(im,0,0);TH.set(key,cvs.toDataURL());if(/^[a-z]+\|(tc|tr|ms|mi)$/.test(key)){THS[key]=TH.get(key);LS.set('th5',THS)}invalidate()}
   if(TH.has(key)&&img.isConnected)img.src=TH.get(key);setTimeout(thRun,12)}
 // pages
 const pill=id=>{const b=PQB[id];return`<span class="pill" title="${b===undefined?'Pas encore fait':'Meilleur score : '+b+' %'}"><i style="width:${b||0}%;background:${b>=80?'var(--ok)':b>=50?'var(--gold)':'var(--ko)'}"></i></span>`};
@@ -988,7 +991,7 @@ function navRender(){const pg=NAV.stack[NAV.stack.length-1],el=$('#nav');if(!pg)
   for(const sec of pg.secs){const cs=sec.cards.filter(c=>!q||norm(c.t+' '+(c.la||'')).includes(q));if(!cs.length)continue;h+=`<h2>${esc(sec.t)}</h2><div class="ngrid ${NAV.grid?'':'list'}">${cs.map(c=>navCard(c,NAV.cards.push(c)-1)).join('')}</div>`}
   $('#navTitle').textContent=pg.t;$('#navBody').innerHTML=h||'<div class="note">Aucun résultat.</div>';$('#navBody').scrollTop=pg.sc||0;
   $$('#navTabs button').forEach(b=>b.classList.toggle('on',b.dataset.m===NAV.mode));$('#navGrid').textContent=NAV.grid?'☰':'▦';
-  NAV.cards.forEach((c,i)=>{const im=$(`#navBody [data-th="${i}"]`);if(TH.has(c.k))im.src=TH.get(c.k);else if(c.ps&&c.ps.length)thumb(c.k,c.ps,im);else if(c.sys){im.classList.add('ld');bgLoad(c.sys)}else im.classList.add('noth')})}
+  NAV.cards.forEach((c,i)=>{const im=$(`#navBody [data-th="${i}"]`);if(TH.has(c.k))im.src=TH.get(c.k);else if(c.ps&&c.ps.length)thumb(c.k,c.ps,im,c.ctx);else if(c.sys){im.classList.add('ld');bgLoad(c.sys)}else im.classList.add('noth')})}
 let bgChain=Promise.resolve();const bgSeen=new Set();
 function bgLoad(s){if(bgSeen.has(s))return;bgSeen.add(s);bgChain=bgChain.then(()=>loadSys(s)).then(()=>{if(NAV.on&&NAV.stack.length===1){NAV.stack[0]=pageHome();navRender()}}).catch(()=>{})}
 function navOpen(mode){if(Q.on||PQ.on)return;if(mode)NAV.mode=mode;NAV.on=true;NAV.q='';$('#navSearch').value='';$('#nav').classList.add('on');NAV.stack=[];navPush(pageHome())}
@@ -997,16 +1000,16 @@ function navBack(){NAV.stack.pop();NAV.q='';$('#navSearch').value='';navRender()
 function navClose(){NAV.stack=[];navRender()}
 function pageHome(){const extra=NAV.mode==='quiz'?[{t:'Autres quiz',cards:MODES.map(m=>({t:m[1],sub:m[2],col:'var(--panel3)',go:()=>{navClose();Q.mode=m[0];quizStart()}}))}]
    :VIEWS.slice(0,1).concat(VIEWS.slice(2)).map(g=>({t:g[0],cards:g[1].map(v=>({t:v[0],col:'var(--panel3)',go:()=>{navClose();applyView(v)}}))})).concat([{t:'Mes vues',cards:MYV.map(v=>({t:v.n,col:'var(--panel3)',go:()=>{navClose();loadView(v)}})).concat([{t:'+ Enregistrer la vue actuelle',col:'var(--panel3)',go:()=>{saveView();navClose()}}])}]);
-  return{t:NAV.mode==='quiz'?'Quiz':'Atlas d\'anatomie',secs:NSYS.map(([id,lab])=>{const s=SYSID[id];return{t:lab,cards:NREG.map(([r,rl])=>({t:rl,k:id+'|'+r,ps:s.state==='ready'?regParts(s,r).concat(id==='articulations'?regParts(SYSID.squelette,r):[]):null,sys:s,go:async()=>{toast('Chargement…');try{await loadSys(s)}catch{return}navPush(pageRegion(s,r,rl))}}))}}).concat(extra)}}
+  return{t:NAV.mode==='quiz'?'Quiz':'Atlas d\'anatomie',secs:NSYS.map(([id,lab])=>{const s=SYSID[id];return{t:lab,cards:NREG.map(([r,rl])=>({t:rl,k:id+'|'+r,ps:s.state==='ready'?regParts(s,r):null,ctx:id!=='squelette'?regParts(SYSID.squelette,r):null,sys:s,go:async()=>{toast('Chargement…');try{await loadSys(s)}catch{return}navPush(pageRegion(s,r,rl))}})).filter(c=>!c.ps||c.ps.length)}}).concat(extra)}}
 function uniq(ps){const m=new Map();for(const p of ps){if(p.side==='l')continue;if(!m.has(p.base))m.set(p.base,p)}return[...m.values()].sort((a,b)=>title(a).localeCompare(title(b),'fr'))}
 const chunks=(a,n)=>{const o=[];for(let i=0;i<a.length;i+=n)o.push(a.slice(i,i+n));if(o.length>1&&o[o.length-1].length<4)o[o.length-2].push(...o.pop());return o};
-function pageRegion(s,r,rl){const ps=regParts(s,r),us=uniq(ps),bone=s.id==='squelette',secs=[];
-  if(NAV.mode==='atlas'){secs.push({t:'Vues',cards:[{t:'Survol',sub:ps.length+' structures',k:s.id+'|'+r,ps,go:()=>viewSet(s,ps,rl)}]});
-    secs.push({t:bone?'Os':'Structures',cards:us.map(p=>({t:title(p),la:p.la,k:'p'+p.id,ps:[p],go:()=>bone?navPush(pageBone(s,p,ps)):viewPart(s,p,ps,'ctx')}))})}
+function pageRegion(s,r,rl){const ps=regParts(s,r),us=uniq(ps),bone=s.id==='squelette',secs=[],rb=bone?[]:regParts(SYSID.squelette,r);
+  if(NAV.mode==='atlas'){secs.push({t:'Vues',cards:[{t:'Survol',sub:ps.length+' structures',k:s.id+'|'+r,ps,ctx:rb,go:()=>viewSet(s,ps.concat(rb),rl)}]});
+    secs.push({t:bone?'Os':'Structures',cards:us.map(p=>({t:title(p),la:p.la,k:(bone?'p':'x')+p.id,ps:[p],ctx:bone?null:nearBones([p]),go:()=>bone?navPush(pageBone(s,p,ps)):viewPart(s,p,ps.concat(rb),'ctx')}))})}
   else{const pool=us.filter(p=>p.fr&&pbox(p)).sort((a,b)=>b.center.y-a.center.y),sets=[],names=c=>c.slice(0,3).map(title).join(', ')+(c.length>3?'…':'');
     if(bone){const m=new Map();for(const p of pool){const k=catOf(p,r);if(!m.has(k))m.set(k,[]);m.get(k).push(p)}for(const [k,a] of m)chunks(a,14).forEach((c,i,all)=>sets.push([k+(all.length>1?' · '+(i+1)+'/'+all.length:''),c]))}
-    else chunks(pool,12).forEach((c,i,all)=>sets.push(['Série '+(i+1)+' sur '+all.length+(all.length>1?(i===0?' · haut':i===all.length-1?' · bas':''):''),c]));
-    secs.push({t:'Quiz : '+rl,cards:sets.map(([t,c],i)=>({t,sub:c.length+' structures : '+names(c),k:'q'+s.id+r+t,ps:c,quiz:{id:s.id+'|'+r+'|'+t},go:()=>pqStart({id:s.id+'|'+r+'|'+t,title:rl+' · '+t,sys:s,ctx:ps,parts:c})}))});
+    else{const m=new Map();for(const p of pool){const k=BANDS[r].find(b=>p.center.y>=b[1]*SCL)[0];if(!m.has(k))m.set(k,[]);m.get(k).push(p)}for(const [k,a] of m)chunks(a,12).forEach((c,i,all)=>sets.push([k+(all.length>1?' · '+(i+1)+'/'+all.length:''),c]))}
+    secs.push({t:'Quiz : '+rl,cards:sets.map(([t,c],i)=>({t,sub:c.length+' structures : '+names(c),k:'q'+s.id+r+t,ps:c,ctx:bone?null:nearBones(c),quiz:{id:s.id+'|'+r+'|'+t},go:()=>pqStart({id:s.id+'|'+r+'|'+t,title:rl+' · '+t,sys:s,ctx:bone?ps:c.concat(nearBones(c)),parts:c})}))});
     if(bone){const lb=us.filter(p=>(CAT.landmarks[p.name]||[]).length>=4);if(lb.length)secs.push({t:'Repères osseux',cards:lb.flatMap(p=>chunks(CAT.landmarks[p.name].map((L,i)=>i),12).map((c,i,a)=>({t:title(p)+lmPart(i,a.length),sub:lmSub(p,c),k:'p'+p.id,ps:[p],quiz:{id:'lm|'+p.base+'|'+i},go:()=>pqStart({id:'lm|'+p.base+'|'+i,title:title(p)+' · reliefs'+(a.length>1?' #'+(i+1):''),sys:s,bone:p,lm:c})})))})}}
   return{t:s.label+' › '+rl,secs}}
 function pageBone(s,p,ctx){const lm=CAT.landmarks[p.name]||[],v=[{t:'Survol',sub:'dans sa région',k:'c'+p.id,ps:ctx,go:()=>viewPart(s,p,ctx,'ctx')},{t:'Os isolé',k:'p'+p.id,ps:[p],go:()=>viewPart(s,p,ctx,'iso')}];
@@ -1016,7 +1019,7 @@ function pageBone(s,p,ctx){const lm=CAT.landmarks[p.name]||[],v=[{t:'Survol',sub
 const lmPart=(i,n)=>n<2?'':n===2?[' · moitié supérieure',' · moitié inférieure'][i]:n===3?[' · tiers supérieur',' · tiers moyen',' · tiers inférieur'][i]:' · partie '+(i+1)+'/'+n;
 const lmSub=(p,c)=>{const L=CAT.landmarks[p.name];return c.length+' reliefs : '+c.slice(0,3).map(i=>L[i].fr||L[i].en).join(', ')+'…'};
 function shuffleSeed(a,seed){let h=hash(seed);const r=()=>{h=Math.imul(h^(h>>>15),2246822507)+1|0;return((h>>>0)%1e6)/1e6};a=a.slice();for(let i=a.length-1;i>0;i--){const j=r()*(i+1)|0;[a[i],a[j]]=[a[j],a[i]]}return a}
-function showSet(s,ps){exOff();closeLm();if(INS.owner)closeIns(true);if(clip.on)setClip(false);select(null);const set=new Set(ps);SYS.forEach(x=>{if(!x.internal)x.on=x===s});for(const p of parts){p.ghost=false;p.flash=0;p.hidden=!set.has(p)}applyAll();SYS.forEach(sysRow);buildTree()}
+function showSet(s,ps){exOff();closeLm();if(INS.owner)closeIns(true);if(clip.on)setClip(false);select(null);const set=new Set(ps);const on=new Set(ps.map(p=>p.sys));on.add(s);SYS.forEach(x=>{if(!x.internal)x.on=on.has(x)});for(const p of parts){p.ghost=false;p.flash=0;p.hidden=!set.has(p)}applyAll();SYS.forEach(sysRow);buildTree()}
 function viewSet(s,ps,lab){pushUndo();showSet(s,ps);navClose();fitAll(new THREE.Vector3(0,0,1),600);toast(lab+' · Survol')}
 function viewPart(s,p,ctx,mode){pushUndo();showSet(s,mode==='ctx'?ctx:[p]);navClose();select(p);if(mode==='lm'){openLm(p);card()}focusSel();toast(title(p)+(mode==='lm'?' · Repères d\'os':mode==='iso'?' · isolé':' · Survol'))}
 // quiz à pastilles : toutes les pastilles sont affichées, on clique celle du nom demandé
@@ -1028,7 +1031,7 @@ function pqStart(def){navClose();PQ.def=def;PQ.snap=PQ.on?PQ.snap:snap();PQ.cam=
     PQ.tinted=[];const keys=[...new Set(def.ctx.map(colKey))].sort();if(s.id==='squelette')def.ctx.forEach(p=>{const c=new THREE.Color(QPAL[keys.indexOf(colKey(p))%QPAL.length]);for(const m of p.meshes){const u=m.material.userData;if(/Cartilage|Teeth|Tendon/.test(p.mat)&&p.meshes.length>1)continue;u.base0=u.base0||u.base.clone();u.base.copy(c)}PQ.tinted.push(p);apply(p)})}
   PQ.pins=PQ.items.map((it,i)=>{const sp=new THREE.Sprite(new THREE.SpriteMaterial({map:pqTex(it.css||'#ffffff'),depthTest:false,depthWrite:false,sizeAttenuation:false,transparent:true}));sp.position.copy(it.pos);sp.renderOrder=30;sp.userData.i=i;sp.scale.setScalar(.02*CFG.pin*THREE.MathUtils.clamp(camera.aspect*1.1,.6,1));pinG.add(sp);return sp});
   PQ.on=true;PQ.ok=PQ.ko=0;PQ.queue=shuffle(PQ.items.map((_,i)=>i));PQ.started=false;document.body.classList.add('inpq');$('#card').classList.remove('on');
-  const b=new THREE.Box3();if(def.ctx)def.ctx.forEach(p=>b.union(pbox(p)));else PQ.items.forEach(it=>b.expandByPoint(it.pos));def.bone?flyTo(def.bone.center,def.bone.radius*1.1,new THREE.Vector3(0,0,1)):flyTo(b.getCenter(new THREE.Vector3()),Math.max(b.getSize(new THREE.Vector3()).length()/2*1.15,.1),new THREE.Vector3(0,0,1));pqPaint()}
+  const b=new THREE.Box3();if(def.ctx)(s.id==='squelette'?def.ctx:def.parts).forEach(p=>b.union(pbox(p)));else PQ.items.forEach(it=>b.expandByPoint(it.pos));def.bone?flyTo(def.bone.center,def.bone.radius*1.1,new THREE.Vector3(0,0,1)):flyTo(b.getCenter(new THREE.Vector3()),Math.max(b.getSize(new THREE.Vector3()).length()/2*1.15,.1),new THREE.Vector3(0,0,1));pqPaint()}
 function pqTex(css){const c=document.createElement('canvas');c.width=c.height=64;const x=c.getContext('2d');x.beginPath();x.arc(32,32,23,0,7);x.fillStyle=css;x.fill();x.lineWidth=8;x.strokeStyle='#0b1114';x.stroke();
   x.beginPath();x.arc(32,32,26.5,0,7);x.lineWidth=2;x.strokeStyle='rgba(255,255,255,.85)';x.stroke();const t=new THREE.CanvasTexture(c);t.colorSpace=THREE.SRGBColorSpace;return t}
 function pqClear(){for(const sp of PQ.pins){pinG.remove(sp);sp.material.map.dispose();sp.material.dispose()}PQ.pins=[];
