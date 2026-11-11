@@ -240,7 +240,7 @@ function surfCompile(sh){
   gl_FragColor=linearToOutputTexel(vec4(diffuseColor.rgb*SECK*f,1.));
  } else gl_FragDepth=gl_FragCoord.z;
  #else
- if(!gl_FrontFacing)gl_FragColor.rgb*=.55;
+ if(!gl_FrontFacing)gl_FragColor=linearToOutputTexel(vec4(diffuseColor.rgb*.42,1.));
  #endif`)
     .replace('#include <roughnessmap_fragment>',`#include <roughnessmap_fragment>
     #ifdef SURF_DETAIL
@@ -327,7 +327,12 @@ function pick(ev,pins=true){
   if(pickDirty){pickables=[];for(const p of parts)if(p.sys.on&&!p.hidden&&!p.ghost)for(const m of p.meshes)pickables.push(m);pickDirty=false}
   rc.firstHitOnly=!clip.on;
   const hits=rc.intersectObjects(pickables,false);
-  for(const h of hits){if(clip.on&&clip.plane.distanceToPoint(h.point)<0)continue;return{part:h.object.userData.part,point:h.point}}
+  if(clip.on&&clip.plane.distanceToPoint(camera.position)<0){const X=new THREE.Vector3();
+    if(rc.ray.intersectPlane(clip.plane,X)){const tX=X.distanceTo(rc.ray.origin),cnt=new Map();
+      for(const h of hits){const p=h.object.userData.part;if(h.distance>tX&&p.capped)cnt.set(p,(cnt.get(p)||0)+1)}
+      let best=null,bp=-1;for(const [p,c] of cnt)if(c%2&&p.capPri>bp){bp=p.capPri;best=p}
+      if(best)return{part:best,point:X}}}
+  for(const h of hits){if(clip.on&&clip.plane.distanceToPoint(h.point)<0)continue;if(clip.on&&h.face&&h.face.normal.clone().transformDirection(h.object.matrixWorld).dot(rc.ray.direction)>0&&!h.object.userData.part.capped)continue;return{part:h.object.userData.part,point:h.point}}
   return null}
 let down=null,hovRaf=0,lastMove=null;
 canvas.addEventListener('pointerdown',e=>{down={x:e.clientX,y:e.clientY,b:e.button};$('#results').classList.remove('on')});
@@ -676,18 +681,28 @@ varying vec3 vW;uniform vec3 uCapN;
 float capVor(vec2 p){vec2 i=floor(p),f=fract(p);float d1=8.,d2=8.;for(int y=-1;y<=1;y++)for(int x=-1;x<=1;x++){vec2 g=vec2(x,y),q=i+g;vec2 o=fract(sin(vec2(dot(q,vec2(127.1,311.7)),dot(q,vec2(269.5,183.3))))*43758.5453);float d=length(g+o-f);if(d<d1){d2=d1;d1=d;}else if(d<d2)d2=d;}return d2-d1;}`)
    .replace('#include <color_fragment>',`#include <color_fragment>
 {vec3 an=abs(uCapN);vec2 pc=an.y>.5?vW.xz:an.x>.5?vW.zy:vW.xy;float f=1.;
-${k===2?'f=.66*mix(.7,1.05,smoothstep(.02,.16,capVor(pc/.0032)))*mix(.94,1.04,capVor(pc/.0007));':k===1?'f=.8*mix(.76,1.04,smoothstep(.04,.3,capVor(pc/.0013)));':'f=.72*mix(.88,1.03,capVor(pc/.0015));'}
+${k===2?'f=.74;':k===1?'f=.9;':'f=.8;'}
 diffuseColor.rgb*=f;}`)}
+const capPri=k=>({1:6,5:4,2:3,0:2,3:1}[k]||0);
+// maillage fermé ? (sinon pas de bouchon : les feuillets ouverts produiraient des éclats)
+// structure fermée ? (ses maillages réunis ; sinon pas de bouchon : un feuillet ouvert produirait des éclats)
+function partOpen(p){if(p.openR!==undefined)return p.openR;const key=new Map(),E=new Map(),v=new THREE.Vector3();
+  const add=(a,b)=>{if(a===b)return;const k=a<b?a*8388608+b:b*8388608+a;E.set(k,(E.get(k)||0)+1)};
+  for(const m of p.meshes){const g=m.geometry,P=g.attributes.position,I=g.index?g.index.array:null,n=I?I.length:P.count,id=new Int32Array(P.count);
+    for(let i=0;i<P.count;i++){v.fromBufferAttribute(P,i).applyMatrix4(m.matrixWorld);const k=Math.round(v.x*1e4)+','+Math.round(v.y*1e4)+','+Math.round(v.z*1e4);let q=key.get(k);if(q===undefined){q=key.size;key.set(k,q)}id[i]=q}
+    for(let t=0;t<n;t+=3){const a=id[I?I[t]:t],b=id[I?I[t+1]:t+1],c=id[I?I[t+2]:t+2];add(a,b);add(b,c);add(c,a)}}
+  let open=0;for(const c of E.values())if(c===1)open++;return p.openR=E.size?open/E.size:1}
 function capMatOf(mt){if(!mt.userData.capM){const m=new THREE.MeshBasicMaterial({side:THREE.DoubleSide,stencilWrite:true,stencilRef:0,stencilFunc:THREE.NotEqualStencilFunc,
-  stencilFail:THREE.ReplaceStencilOp,stencilZFail:THREE.ReplaceStencilOp,stencilZPass:THREE.ReplaceStencilOp});m.color=mt.color;m.userData.kind=mt.userData.kind|0;m.polygonOffset=true;m.polygonOffsetFactor=0;m.polygonOffsetUnits=-(({1:5,2:3,0:2,3:1}[m.userData.kind]||0)*6+(mt.id%5));
+  stencilFail:THREE.ReplaceStencilOp,stencilZFail:THREE.ReplaceStencilOp,stencilZPass:THREE.ReplaceStencilOp});m.color=mt.color;m.userData.kind=mt.userData.kind|0;m.polygonOffset=true;m.polygonOffsetFactor=0;m.polygonOffsetUnits=-(capPri(m.userData.kind)*6+(mt.id%5));
   m.onBeforeCompile=capCompile;m.customProgramCacheKey=function(){return'cap'+this.userData.kind};mt.userData.capM=m}return mt.userData.capM}
-function rebuildCaps(){capsDirty=false;for(const c of capG.children.slice())capG.remove(c);if(!clip.on)return;
-  const n=clip.plane.normal,q=new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0,0,1),n),bb=new THREE.Box3(),c=new THREE.Vector3(),sz=new THREE.Vector3();let ro=10;
-  for(const p of parts){if(!p.sys.on||p.hidden||p.ghost||p.ins)continue;
-    for(const m of p.meshes){const k=m.material.userData.kind|0;if(k>3)continue;if(!m.geometry.boundingBox)m.geometry.computeBoundingBox();bb.copy(m.geometry.boundingBox).applyMatrix4(m.matrixWorld);if(!clip.plane.intersectsBox(bb))continue;
-      for(const mat of[sBack,sFront]){const s=new THREE.Mesh(m.geometry,mat);s.matrixAutoUpdate=false;s.matrix.copy(m.matrixWorld);s.renderOrder=ro;s.raycast=()=>{};capG.add(s)}
-      const cap=new THREE.Mesh(quadG,capMatOf(m.material));bb.getCenter(c);clip.plane.projectPoint(c,cap.position);cap.position.addScaledVector(n,2e-4);cap.quaternion.copy(q);
-      cap.scale.setScalar(bb.getSize(sz).length()*1.02);cap.renderOrder=ro+1;cap.raycast=()=>{};capG.add(cap);ro+=2}}
+function rebuildCaps(){capsDirty=false;for(const p of parts)p.capped=false;for(const c of capG.children.slice())capG.remove(c);if(!clip.on)return;
+  const n=clip.plane.normal,q=new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0,0,1),n),c=new THREE.Vector3(),sz=new THREE.Vector3();let ro=10;
+  for(const p of parts){if(!p.sys.on||p.hidden||p.ghost||p.ins||p.sys.id==='regions')continue;const bb=pbox(p);if(!clip.plane.intersectsBox(bb))continue;
+    if(/intercostal|^Transversus thoracis|^Subcostal|^Levatores/.test(p.base)||partOpen(p)>.03)continue;
+    let dom=p.meshes[0];for(const m of p.meshes)if(m.geometry.attributes.position.count>dom.geometry.attributes.position.count)dom=m;if((dom.material.userData.kind|0)===4)continue;
+    for(const m of p.meshes)for(const mat of[sBack,sFront]){const s=new THREE.Mesh(m.geometry,mat);s.matrixAutoUpdate=false;s.matrix.copy(m.matrixWorld);s.renderOrder=ro;s.raycast=()=>{};capG.add(s)}
+    const cap=new THREE.Mesh(quadG,capMatOf(dom.material));bb.getCenter(c);clip.plane.projectPoint(c,cap.position);cap.position.addScaledVector(n,2e-4);cap.quaternion.copy(q);
+    cap.scale.setScalar(bb.getSize(sz).length()*1.02);cap.renderOrder=ro+1;cap.raycast=()=>{};capG.add(cap);p.capped=true;p.capPri=capPri(dom.material.userData.kind|0);ro+=2}
   capG.updateMatrixWorld(true);invalidate()}
 function updClip(){capsDirty=true;const a=clip.axis,k=+$('#clipPos').value/1000,v=clip.box.min[a]+(clip.box.max[a]-clip.box.min[a])*k,s=clip.flip?1:-1;
   clip.plane.normal.set(a==='x'?s:0,a==='y'?s:0,a==='z'?s:0);CAP.uCapN.value.copy(clip.plane.normal);clip.plane.constant=-s*v;invalidate()}
