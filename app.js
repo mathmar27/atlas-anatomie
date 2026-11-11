@@ -17,7 +17,7 @@ const LS={get(k,d){try{const v=localStorage.getItem('atlas.'+k);return v==null?d
 // ------------------------------------------------------------------ réglages
 const MOBILE=matchMedia('(pointer:coarse)').matches||Math.min(innerWidth,innerHeight)<600;
 const DEF={shadows:!MOBILE,shadowStrength:.65,ground:true,detail:MOBILE?0:1,exposure:1.05,quality:'auto',fov:30,zoom:1,rotate:1,invertZoom:false,inertia:true,
- pin:1,halo:1,labels:!MOBILE,ghost:.07,tips:true,sex:'m'};
+ pin:1,halo:1,labels:!MOBILE,ghost:.07,tips:true,sex:'m',sheath:false};
 const CFG=Object.assign({},DEF,LS.get('cfg',{}));
 // ------------------------------------------------------------------ morphologie féminine (déformation du modèle de base)
 const SEX=CFG.sex==='f'?'f':'m',SCL=SEX==='f'?.93:1;
@@ -144,7 +144,7 @@ function tint(mn,orig,s,name){
   const c=new THREE.Color(s.color);
   if(s.id==='muscles'||mn==='Trapezius'||mn==='Diaphragm'||FUNC[mn]){c.set(0xa9463e);const h=(hash(name)%100)/100;c.offsetHSL((h-.5)*.02,0,(h-.5)*.07)}
   return c}
-const SURF={uDetail:{value:0}};
+const SURF={uDetail:{value:0}};const SHEATH={value:0};
 function kindOf(mn,s){if(mn==='Black')return 6;if(/^Bone|^Os-|Teeth|Suture|Dentine/.test(mn))return 1;if(/Tendon|Ligament|Fascia|capsule|Cartilage/i.test(mn))return 5;if(s.id==='muscles'||FUNC[mn])return 2;
   return{vaisseaux:3,nerfs:3,lymphatique:3,regions:4,squelette:1,insertions:3}[s.id]||0}
 function surfKey(){return'surf'+(this.userData.kind|0)+(this.userData.halo?'h':'')+(CFG.detail>0?'d':'')+(this.userData.apo?'a':'')}
@@ -162,8 +162,9 @@ function taubin(g,it){const P=g.attributes.position.array,n=P.length/3,I=g.index
     P.set(Q)}
   g.attributes.position.needsUpdate=true;g.computeVertexNormals();g.computeBoundingBox();g.computeBoundingSphere()}
 function fixOblique(o,mat){const g=o.geometry;if(g.index&&g.attributes.position.count>40000)taubin(g,5);const P=g.attributes.position,a=new Float32Array(P.count),v=new THREE.Vector3();
-  for(let i=0;i<P.count;i++){v.fromBufferAttribute(P,i).applyMatrix4(o.matrixWorld);const ax=Math.abs(v.x),b=.087+.034*(1-sm(.935,1.0,v.y));a[i]=1-sm(b-.009,b+.009,ax)}
-  g.setAttribute('aApo',new THREE.BufferAttribute(a,1));mat.userData.apo=true;mat.userData.apoU={value:1}}
+  const cv=new Float32Array(P.count);
+  for(let i=0;i<P.count;i++){v.fromBufferAttribute(P,i).applyMatrix4(o.matrixWorld);const ax=Math.abs(v.x),b=.087+.034*(1-sm(.935,1.0,v.y));a[i]=1-sm(b-.009,b+.009,ax);cv[i]=(1-sm(.079,.086,ax))*sm(.845,.86,v.y)*sm(-.02,.0,v.z)}
+  g.setAttribute('aApo',new THREE.BufferAttribute(a,1));g.setAttribute('aCov',new THREE.BufferAttribute(cv,1));mat.userData.apo=true;mat.userData.apoU={value:1}}
 const GLSL_NOISE=`
 float h13(vec3 p){p=fract(p*.1031);p+=dot(p,p.zyx+31.32);return fract((p.x+p.y)*p.z);}
 float vn(vec3 p){vec3 i=floor(p),f=fract(p);f=f*f*(3.-2.*f);
@@ -210,8 +211,8 @@ float surfH(vec3 p,float px){float h=0.;
 `;
 function surfCompile(sh){
   const u=this.userData,det=CFG.detail>0;Object.assign(sh.uniforms,LMU,SURF);
-  if(u.apo){sh.uniforms.uApoK=u.apoU;sh.vertexShader=sh.vertexShader.replace('#include <common>','#include <common>\nattribute float aApo;varying float vApo;').replace('#include <begin_vertex>','#include <begin_vertex>\nvApo=aApo;');
-    sh.fragmentShader=sh.fragmentShader.replace('#include <common>','#include <common>\nvarying float vApo;uniform float uApoK;').replace('#include <color_fragment>','#include <color_fragment>\ndiffuseColor.rgb=mix(diffuseColor.rgb,vec3(.74,.67,.56),vApo*uApoK);')}
+  if(u.apo){sh.uniforms.uApoK=u.apoU;sh.uniforms.uSheath=SHEATH;sh.vertexShader=sh.vertexShader.replace('#include <common>','#include <common>\nattribute float aApo;attribute float aCov;varying float vApo;varying float vCov;').replace('#include <begin_vertex>','#include <begin_vertex>\nvApo=aApo;vCov=aCov;');
+    sh.fragmentShader=sh.fragmentShader.replace('#include <common>','#include <common>\nvarying float vApo;varying float vCov;uniform float uApoK;uniform float uSheath;').replace('#include <clipping_planes_fragment>','#include <clipping_planes_fragment>\nif(uSheath<.5&&vCov>.5)discard;').replace('#include <color_fragment>','#include <color_fragment>\ndiffuseColor.rgb=mix(diffuseColor.rgb,vec3(.74,.67,.56),vApo*uApoK);')}
   sh.vertexShader=sh.vertexShader.replace('#include <common>','#include <common>\nvarying vec3 vHP;varying vec3 vHN;')
     .replace('#include <begin_vertex>','#include <begin_vertex>\nvHP=(modelMatrix*vec4(transformed,1.)).xyz;vHN=normalize(mat3(modelMatrix)*objectNormal);');
   sh.fragmentShader=sh.fragmentShader.replace('#include <common>','#include <common>\nvarying vec3 vHP;varying vec3 vHN;uniform float uDetail;float gH=0.;\n#define KIND '+(u.kind|0)+'\n'+(det?'#define SURF_DETAIL\n':'')+(u.halo?'#define SURF_HALO\n':'')
@@ -313,9 +314,10 @@ function pick(ev,pins=true){
   const r=canvas.getBoundingClientRect();ndc.set((ev.clientX-r.left)/r.width*2-1,-(ev.clientY-r.top)/r.height*2+1);rc.setFromCamera(ndc,camera);
   if(pins&&LM.bone){const h=rc.intersectObjects(LM.pins.filter(s=>s.visible),false);if(h.length)return{lm:h[0].object.userData.i}}
   if(pickDirty){pickables=[];for(const p of parts)if(p.sys.on&&!p.hidden&&!p.ghost)for(const m of p.meshes)pickables.push(m);pickDirty=false}
-  rc.firstHitOnly=!clip.on;
+  rc.firstHitOnly=!clip.on&&!!CFG.sheath;
   const hits=rc.intersectObjects(pickables,false);
-  for(const h of hits){if(clip.on&&clip.plane.distanceToPoint(h.point)<0)continue;return{part:h.object.userData.part,point:h.point}}
+  for(const h of hits){if(clip.on&&clip.plane.distanceToPoint(h.point)<0)continue;
+    const cv=!CFG.sheath&&h.face&&h.object.geometry.attributes.aCov;if(cv&&cv.getX(h.face.a)+cv.getX(h.face.b)+cv.getX(h.face.c)>1.5)continue;return{part:h.object.userData.part,point:h.point}}
   return null}
 let down=null,hovRaf=0,lastMove=null;
 canvas.addEventListener('pointerdown',e=>{down={x:e.clientX,y:e.clientY,b:e.button};$('#results').classList.remove('on')});
@@ -722,6 +724,7 @@ const ROWS=[['h','Affichage'],['tog','shadows','Ombres portées'],['rng','shadow
  ['rng','fov','Perspective',14,60,1],
  ['h','Navigation'],['rng','zoom','Vitesse du zoom',.3,4,.1],['rng','rotate','Vitesse de rotation',.3,2.5,.1],['tog','invertZoom','Inverser le sens du zoom'],['tog','inertia','Inertie des mouvements'],
  ['h','Reliefs osseux'],['rng','pin','Taille des pastilles',.6,1.8,.1],['seg','halo','Halos colorés',[[0,'Aucun'],[1,'Normal'],[1.6,'Large']]],['tog','labels','Étiquettes autour de l\'os'],
+ ['h','Anatomie'],['tog','sheath','Gaine des droits (aponévroses devant les abdominaux)'],
  ['h','Divers'],['rng','ghost','Opacité des structures estompées',.02,.35,.01],['tog','tips','Nom au survol de la souris']];
 function applyCfg(k){
   renderer.toneMappingExposure=CFG.exposure;
@@ -730,7 +733,7 @@ function applyCfg(k){
   if(camera.fov!==CFG.fov){const d=camera.position.distanceTo(controls.target),f=Math.tan(THREE.MathUtils.degToRad(camera.fov/2))/Math.tan(THREE.MathUtils.degToRad(CFG.fov/2));
     camera.position.sub(controls.target).multiplyScalar(f).add(controls.target);camera.fov=CFG.fov;camera.updateProjectionMatrix()}
   const d=dprFor();if(d!==fullDpr){fullDpr=curDpr=d;resize()}
-  SURF.uDetail.value=[0,.7,1.5][CFG.detail]||0;
+  SURF.uDetail.value=[0,.7,1.5][CFG.detail]||0;SHEATH.value=CFG.sheath?1:0;
   if(k==='detail'||k==='shadows'||k==='*')for(const p of parts)for(const m of p.meshes)m.material.needsUpdate=true;
   if(k==='ghost'||k==='*')for(const p of parts)if(p.ghost)apply(p);
   S.labels=CFG.labels;$('#labBtn').classList.toggle('on',CFG.labels);LMU.uLmK.value=CFG.halo;invalidate()}
