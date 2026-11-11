@@ -71,7 +71,7 @@ function boneGroup(en){const s=en.toLowerCase();
 
 // ------------------------------------------------------------------ scène
 const canvas=$('#c');
-const renderer=new THREE.WebGLRenderer({canvas,antialias:true,alpha:true,powerPreference:'high-performance'});
+const renderer=new THREE.WebGLRenderer({canvas,antialias:true,alpha:true,powerPreference:'high-performance',stencil:true});
 renderer.setClearColor(0x000000,0);renderer.toneMapping=THREE.ACESFilmicToneMapping;renderer.toneMappingExposure=1.05;
 const scene=new THREE.Scene();
 scene.environment=new THREE.PMREMGenerator(renderer).fromScene(new RoomEnvironment(),.04).texture;
@@ -129,6 +129,7 @@ function loop(t){
   {const d=camera.position.distanceTo(controls.target),n=THREE.MathUtils.clamp(d*.04,.0015,.12),f=d+3.2;if(Math.abs(camera.near-n)>n*.05||Math.abs(camera.far-f)>.3){camera.near=n;camera.far=f;camera.updateProjectionMatrix();dirty=true}}
   if(!dirty){lastT=t;return}
   if(moving){if(t-lastT>34)slow++;else slow=Math.max(0,slow-1);if(slow>6){if(curDpr>1){curDpr=1;renderer.setPixelRatio(1);renderer.setSize(innerWidth,innerHeight,false)}slow=0}}
+  if(clip.on&&capsDirty)rebuildCaps();
   lastT=t;dirty=false;const still=!moving&&!tw&&t-lastZoom>200;updateLight(still);if(still&&CFG.shadows)renderer.shadowMap.needsUpdate=true;updatePins();renderer.render(scene,camera);layoutLabels()}
 
 // ------------------------------------------------------------------ données
@@ -152,7 +153,7 @@ function tint0(mn,orig,s,name){
   const c=new THREE.Color(s.color);
   if(s.id==='muscles'||mn==='Trapezius'||mn==='Diaphragm'||FUNC[mn]){c.set(0xa9463e);const h=(hash(name)%100)/100;c.offsetHSL((h-.5)*.02,0,(h-.5)*.07)}
   return c}
-const SURF={uDetail:{value:0},uSec:{value:0}};
+const SURF={uDetail:{value:0},uSec:{value:0}};const CAP={uProj:{value:null},uViewInv:{value:null},uCapN:{value:new THREE.Vector3(1,0,0)}};
 function kindOf(mn,s){if(mn==='Black')return 6;if(/^Bone|^Os-|Teeth|Suture|Dentine/.test(mn))return 1;if(/Tendon|Ligament|Fascia|capsule|Cartilage/i.test(mn))return 5;if(s.id==='muscles'||FUNC[mn])return 2;
   return{vaisseaux:3,nerfs:3,lymphatique:3,regions:4,squelette:1,insertions:3}[s.id]||0}
 function surfKey(){return'surf'+(this.userData.kind|0)+(this.userData.halo?'h':'')+(CFG.detail>0?'d':'')}
@@ -201,11 +202,11 @@ float surfH(vec3 p,float px){float h=0.;
 #endif
 `;
 function surfCompile(sh){
-  const u=this.userData,det=CFG.detail>0;Object.assign(sh.uniforms,LMU,SURF);
+  const u=this.userData,det=CFG.detail>0,cc=clip.on;CAP.uProj.value=camera.projectionMatrix;CAP.uViewInv.value=camera.matrixWorld;Object.assign(sh.uniforms,LMU,SURF,CAP);sh.uniforms.uCapB=u.capB||{value:0};
   sh.vertexShader=sh.vertexShader.replace('#include <common>','#include <common>\nvarying vec3 vHP;varying vec3 vHN;')
     .replace('#include <begin_vertex>','#include <begin_vertex>\nvHP=(modelMatrix*vec4(transformed,1.)).xyz;vHN=normalize(mat3(modelMatrix)*objectNormal);');
   sh.fragmentShader=sh.fragmentShader.replace('#include <common>','#include <common>\nvarying vec3 vHP;varying vec3 vHN;uniform float uDetail;float gH=0.;\n#define KIND '+(u.kind|0)+'\n'+'#define SECK '+(u.kind===1?'.78':u.kind===2?'.62':'.7')+'\n'+(det?'#define SURF_DETAIL\n':'')+(u.halo?'#define SURF_HALO\n':'')
-      +'uniform float uSec;uniform int uLmCount;uniform int uLmSel;uniform float uLmK;uniform vec3 uLmP[64];uniform vec3 uLmN[64];uniform vec3 uLmC[64];uniform float uLmR[64];\n'+(det?GLSL_NOISE:''))
+      +'uniform float uSec;uniform mat4 uProj;uniform mat4 uViewInv;uniform vec3 uCapN;uniform float uCapB;\nfloat capVor(vec2 p){vec2 i=floor(p),f=fract(p);float d1=8.,d2=8.;for(int y=-1;y<=1;y++)for(int x=-1;x<=1;x++){vec2 g=vec2(x,y),q=i+g;vec2 o=fract(sin(vec2(dot(q,vec2(127.1,311.7)),dot(q,vec2(269.5,183.3))))*43758.5453);float d=length(g+o-f);if(d<d1){d2=d1;d1=d;}else if(d<d2)d2=d;}return d2-d1;}\nuniform int uLmCount;uniform int uLmSel;uniform float uLmK;uniform vec3 uLmP[64];uniform vec3 uLmN[64];uniform vec3 uLmC[64];uniform float uLmR[64];\n'+(det?GLSL_NOISE:''))
     .replace('#include <color_fragment>',`#include <color_fragment>
     #ifdef SURF_DETAIL
     {gH=surfH(vHP,length(fwidth(vHP)));diffuseColor.rgb*=1.+(gH-.45)*CAMP*uDetail;
@@ -223,7 +224,24 @@ function surfCompile(sh){
        float w=1.-d/r;w=w*w*(3.-2.*w);w=min(1.,w*1.6)*(i==uLmSel?.95:(uLmSel>=0?.45:.8));if(w>bw){bw=w;bc=uLmC[i];}}
      diffuseColor.rgb=mix(diffuseColor.rgb,bc,bw);}
     #endif`)
-    .replace('#include <dithering_fragment>','#include <dithering_fragment>\n if(!gl_FrontFacing){if(uSec>.5){vec3 sc=diffuseColor.rgb*SECK;gl_FragColor=linearToOutputTexel(vec4(sc,1.));}else gl_FragColor.rgb*=.55;}')
+    .replace('#include <dithering_fragment>',`#include <dithering_fragment>
+ #if defined(CLIPCAP) && NUM_CLIPPING_PLANES > 0
+ if(!gl_FrontFacing){
+  vec4 pl=clippingPlanes[0];vec3 Q=vClipPosition;float tt=pl.w/dot(Q,pl.xyz);vec3 Pb=-Q*tt;
+  vec4 cp=uProj*vec4(Pb,1.);gl_FragDepth=clamp(cp.z/cp.w*.5+.5-uCapB,0.,1.);
+  vec3 W=(uViewInv*vec4(Pb,1.)).xyz;vec3 an=abs(uCapN);vec2 pc=an.y>.5?W.xz:an.x>.5?W.zy:W.xy;float f=1.;
+  #if KIND==2
+   f=mix(.68,1.04,smoothstep(.02,.16,capVor(pc/.0032)))*mix(.94,1.04,capVor(pc/.0007));
+  #elif KIND==1
+   f=mix(.78,1.05,smoothstep(.04,.3,capVor(pc/.0013)));
+  #else
+   f=mix(.9,1.03,capVor(pc/.0015));
+  #endif
+  gl_FragColor=linearToOutputTexel(vec4(diffuseColor.rgb*SECK*f,1.));
+ } else gl_FragDepth=gl_FragCoord.z;
+ #else
+ if(!gl_FrontFacing)gl_FragColor.rgb*=.55;
+ #endif`)
     .replace('#include <roughnessmap_fragment>',`#include <roughnessmap_fragment>
     #ifdef SURF_DETAIL
      roughnessFactor=clamp(roughnessFactor+(.45-gH)*.3*uDetail,.18,1.);
@@ -250,6 +268,7 @@ function ingest(gltf,s){
     const base=tint(mn,o.material.color||new THREE.Color(1,1,1),s,p.base);
     const mat=new THREE.MeshStandardMaterial({color:base.clone(),roughness:s.rough,metalness:0,envMapIntensity:.7,side:o.material.side});
     mat.userData.kind=kindOf(mn,s);mat.userData.side0=[0,1,2].includes(mat.userData.kind)&&s.id!=='regions'?THREE.DoubleSide:o.material.side;mat.side=mat.userData.side0;
+    mat.userData.capB={value:({1:4,2:3,0:2,3:1}[mat.userData.kind]||0)*4e-6+(hash(name)%997)*2e-9};
     if(mat.userData.kind===3){mat.polygonOffset=true;mat.polygonOffsetFactor=-1;mat.polygonOffsetUnits=-2}
     mat.onBeforeCompile=surfCompile;mat.customProgramCacheKey=surfKey;o.castShadow=o.receiveShadow=true;
     if(s.id==='insertions'){mat.polygonOffset=true;mat.polygonOffsetFactor=-3;mat.polygonOffsetUnits=-3}
@@ -268,7 +287,7 @@ function apply(p){
     if(p.flash){mt.color.copy(p.flash>0?GREEN:RED);mt.emissive.copy(mt.color).multiplyScalar(.25)}
     else if(sel){mt.color.copy(mt.userData.base).lerp(GOLD,.82);mt.emissive.setRGB(.26,.13,.0)}
     else{mt.color.copy(mt.userData.base);if(hov)mt.emissive.setRGB(.06,.085,.08);else mt.emissive.setRGB(0,0,0)}}
-  pickDirty=visDirty=true;invalidate()}
+  pickDirty=visDirty=capsDirty=true;invalidate()}
 const WHITEISH=new THREE.Color(0xf1e9d8);
 const applyAll=()=>parts.forEach(apply);
 
@@ -642,11 +661,36 @@ $('#labBtn').onclick=()=>{setCfg('labels',!CFG.labels)};
 function setClip(on){
   clip.on=on;$('#clipPop').classList.toggle('on',on);$('#clipBtn').classList.toggle('on',on);
   if(on){clip.box=visibleBox();if(clip.box.isEmpty())clip.box.set(new THREE.Vector3(-1,0,-1),new THREE.Vector3(1,1.8,1));updClip()}
-  renderer.clippingPlanes=on?[clip.plane]:[];SURF.uSec.value=on?1:0;
-  for(const p of parts)if(!p.gen)for(const m of p.meshes){const sd=on?THREE.DoubleSide:(m.material.userData.side0??THREE.FrontSide);if(m.material.side!==sd){m.material.side=sd;m.material.needsUpdate=true}}
+  renderer.clippingPlanes=on?[clip.plane]:[];capsDirty=true;if(!on)rebuildCaps();SURF.uSec.value=on?1:0;
+  for(const p of parts)for(const m of p.meshes){m.material.side=on?THREE.DoubleSide:(m.material.userData.side0??THREE.FrontSide);m.material.needsUpdate=true}
   pickDirty=true;invalidate()}
-function updClip(){const a=clip.axis,k=+$('#clipPos').value/1000,v=clip.box.min[a]+(clip.box.max[a]-clip.box.min[a])*k,s=clip.flip?1:-1;
-  clip.plane.normal.set(a==='x'?s:0,a==='y'?s:0,a==='z'?s:0);clip.plane.constant=-s*v;invalidate()}
+// ---- bouchons de coupe (stencil) : surface de section plane et texturée pour chaque structure traversée par le plan
+const capG=new THREE.Group();scene.add(capG);let capsDirty=true;
+const stOp=op=>({colorWrite:false,depthWrite:false,depthTest:false,stencilWrite:true,stencilFunc:THREE.AlwaysStencilFunc,stencilFail:op,stencilZFail:op,stencilZPass:op});
+const sBack=new THREE.MeshBasicMaterial(Object.assign({side:THREE.BackSide},stOp(THREE.IncrementWrapStencilOp))),sFront=new THREE.MeshBasicMaterial(Object.assign({side:THREE.FrontSide},stOp(THREE.DecrementWrapStencilOp)));
+const quadG=new THREE.PlaneGeometry(1,1);
+function capCompile(sh){Object.assign(sh.uniforms,CAP);const k=this.userData.kind|0;
+  sh.vertexShader=sh.vertexShader.replace('#include <common>','#include <common>\nvarying vec3 vW;').replace('#include <begin_vertex>','#include <begin_vertex>\nvW=(modelMatrix*vec4(transformed,1.)).xyz;');
+  sh.fragmentShader=sh.fragmentShader.replace('#include <common>',`#include <common>
+varying vec3 vW;uniform vec3 uCapN;
+float capVor(vec2 p){vec2 i=floor(p),f=fract(p);float d1=8.,d2=8.;for(int y=-1;y<=1;y++)for(int x=-1;x<=1;x++){vec2 g=vec2(x,y),q=i+g;vec2 o=fract(sin(vec2(dot(q,vec2(127.1,311.7)),dot(q,vec2(269.5,183.3))))*43758.5453);float d=length(g+o-f);if(d<d1){d2=d1;d1=d;}else if(d<d2)d2=d;}return d2-d1;}`)
+   .replace('#include <color_fragment>',`#include <color_fragment>
+{vec3 an=abs(uCapN);vec2 pc=an.y>.5?vW.xz:an.x>.5?vW.zy:vW.xy;float f=1.;
+${k===2?'f=.66*mix(.7,1.05,smoothstep(.02,.16,capVor(pc/.0032)))*mix(.94,1.04,capVor(pc/.0007));':k===1?'f=.8*mix(.76,1.04,smoothstep(.04,.3,capVor(pc/.0013)));':'f=.72*mix(.88,1.03,capVor(pc/.0015));'}
+diffuseColor.rgb*=f;}`)}
+function capMatOf(mt){if(!mt.userData.capM){const m=new THREE.MeshBasicMaterial({side:THREE.DoubleSide,stencilWrite:true,stencilRef:0,stencilFunc:THREE.NotEqualStencilFunc,
+  stencilFail:THREE.ReplaceStencilOp,stencilZFail:THREE.ReplaceStencilOp,stencilZPass:THREE.ReplaceStencilOp});m.color=mt.color;m.userData.kind=mt.userData.kind|0;m.polygonOffset=true;m.polygonOffsetFactor=0;m.polygonOffsetUnits=-(({1:5,2:3,0:2,3:1}[m.userData.kind]||0)*6+(mt.id%5));
+  m.onBeforeCompile=capCompile;m.customProgramCacheKey=function(){return'cap'+this.userData.kind};mt.userData.capM=m}return mt.userData.capM}
+function rebuildCaps(){capsDirty=false;for(const c of capG.children.slice())capG.remove(c);if(!clip.on)return;
+  const n=clip.plane.normal,q=new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0,0,1),n),bb=new THREE.Box3(),c=new THREE.Vector3(),sz=new THREE.Vector3();let ro=10;
+  for(const p of parts){if(!p.sys.on||p.hidden||p.ghost||p.ins)continue;
+    for(const m of p.meshes){const k=m.material.userData.kind|0;if(k>3)continue;if(!m.geometry.boundingBox)m.geometry.computeBoundingBox();bb.copy(m.geometry.boundingBox).applyMatrix4(m.matrixWorld);if(!clip.plane.intersectsBox(bb))continue;
+      for(const mat of[sBack,sFront]){const s=new THREE.Mesh(m.geometry,mat);s.matrixAutoUpdate=false;s.matrix.copy(m.matrixWorld);s.renderOrder=ro;s.raycast=()=>{};capG.add(s)}
+      const cap=new THREE.Mesh(quadG,capMatOf(m.material));bb.getCenter(c);clip.plane.projectPoint(c,cap.position);cap.position.addScaledVector(n,2e-4);cap.quaternion.copy(q);
+      cap.scale.setScalar(bb.getSize(sz).length()*1.02);cap.renderOrder=ro+1;cap.raycast=()=>{};capG.add(cap);ro+=2}}
+  capG.updateMatrixWorld(true);invalidate()}
+function updClip(){capsDirty=true;const a=clip.axis,k=+$('#clipPos').value/1000,v=clip.box.min[a]+(clip.box.max[a]-clip.box.min[a])*k,s=clip.flip?1:-1;
+  clip.plane.normal.set(a==='x'?s:0,a==='y'?s:0,a==='z'?s:0);CAP.uCapN.value.copy(clip.plane.normal);clip.plane.constant=-s*v;invalidate()}
 $('#clipBtn').onclick=()=>setClip(!clip.on);$('#clipOff').onclick=()=>setClip(false);$('#clipPos').oninput=updClip;$('#clipFlip').onclick=()=>{clip.flip=!clip.flip;updClip()};
 $$('#clipAxis button').forEach(b=>b.onclick=()=>{clip.axis=b.dataset.ax;$$('#clipAxis button').forEach(x=>x.classList.toggle('on',x===b));updClip()});
 function shot(){const light=document.documentElement.dataset.theme==='light';scene.background=new THREE.Color(light?0xf3efe8:0x10191d);updatePins();renderer.render(scene,camera);
