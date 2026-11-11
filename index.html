@@ -61,7 +61,8 @@ button.on kbd{color:inherit;border-color:currentColor;opacity:.7}
 #pane-explore.on{display:flex;flex-direction:column}#sysBox{flex:none}#tree{flex:1;min-height:0}
 #sysList{display:grid;grid-template-columns:1fr 1fr;gap:1px 4px}#optList{margin:6px 0 0;flex-wrap:wrap}#optList button{font-size:12px;padding:4px 6px}
 .hrow{display:flex;align-items:center;justify-content:space-between}.hrow .seg{flex:none;text-transform:none;letter-spacing:0}.hrow .seg button{font-size:11.5px;padding:2px 9px;min-height:0;color:var(--tx)}.hrow .seg button.on{color:var(--accInk)}
-.vgrid{display:grid;grid-template-columns:1fr 1fr;gap:5px}.vgrid button{text-align:left;padding:8px 10px;font-size:12.5px}
+.vgrid{display:grid;grid-template-columns:1fr 1fr;gap:5px}.vgrid button{text-align:left;padding:8px 10px;font-size:12.5px}.mv{display:flex;gap:2px;min-width:0}.mv button:first-child{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.mv button:last-child{padding:8px 9px;color:var(--mut)}
+#mvName{flex:1;min-width:0;background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:6px 8px}
 #exPop label{display:flex;align-items:center;gap:8px;font-size:12.5px;color:var(--mut);white-space:nowrap}#exHint{flex-basis:100%;text-align:center;font-size:11.5px}
 h3{font-size:11px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--mut);margin:14px 4px 6px}
 h3:first-child{margin-top:2px}
@@ -203,7 +204,7 @@ select option{color:#111}
   </div>
   <div class="tabs"><button data-tab="explore" class="on">Explorer</button><button data-tab="views">Vues</button><button data-tab="quiz">Quiz</button></div>
   <div id="pane-explore" class="pane on">
-    <div id="sysBox"><h3 class="hrow">Systèmes<span class="seg" id="sexSeg"><button data-sex="m">Homme</button><button data-sex="f">Femme</button></span></h3><div id="sysList"></div>
+    <div id="sysBox"><h3 class="hrow">Systèmes</h3><div id="sysList"></div>
     <div class="seg" id="optList"><button data-opt="Fascia" title="Afficher aussi les fascias">+ Fascias</button><button data-opt="Bursa" title="Afficher aussi les bourses synoviales">+ Bourses</button><button data-opt="White matter" title="Afficher aussi les structures profondes de l'encéphale (substance blanche, commissures, hypothalamus…)">+ Encéphale profond</button></div></div>
     <h3>Structures</h3><div id="tree" class="scroll"></div>
   </div>
@@ -222,10 +223,10 @@ select option{color:#111}
   <button id="clipFlip" title="Garder l'autre côté">⇄</button><button id="clipOff">Fermer</button>
 </div>
 <div id="bar" class="panel">
-  <button id="undo" title="Annuler la dernière action">↶ Annuler<kbd>Z</kbd></button>
+  <button id="undo" title="Annuler la dernière action (Z)">↶ Annuler</button><button id="redo" title="Rétablir (Maj + Z)">↷</button>
   <button id="showAll" title="Tout réafficher">Tout afficher<kbd>A</kbd></button>
   <span class="sep"></span>
-  <button id="clipBtn">Coupe</button><button id="labBtn" class="on" title="Étiquettes des reliefs">Étiquettes<kbd>L</kbd></button>
+  <button id="multiBtn" title="Sélection multiple (ou Maj + clic)">Sélection +</button><button id="clipBtn">Coupe</button><button id="labBtn" class="on" title="Étiquettes des reliefs">Étiquettes<kbd>L</kbd></button>
   <button id="exBtn" title="Vue éclatée : écarter les structures (E)">Éclater</button><button id="disBtn" title="Dissection : chaque clic retire une structure (D)">Dissection</button>
 </div>
 <div id="exPop" class="panel">
@@ -247,7 +248,9 @@ select option{color:#111}
 <tr class="kb"><td><kbd>←</kbd> <kbd>→</kbd></td><td>Structure (ou relief) précédente / suivante</td></tr>
 <tr class="kb"><td><kbd>S</kbd></td><td>Ajouter aux favoris</td></tr>
 <tr class="kb"><td><kbd>1</kbd>–<kbd>5</kbd></td><td>Vue de face · de dos · profil droit · profil gauche · de dessus</td></tr>
-<tr class="kb"><td><kbd>Z</kbd> <kbd>A</kbd></td><td>Annuler · tout réafficher</td></tr>
+<tr class="kb"><td><kbd>Z</kbd> <kbd>Maj</kbd>+<kbd>Z</kbd> <kbd>A</kbd></td><td>Annuler · rétablir · tout réafficher</td></tr>
+<tr><td>Sélection multiple</td><td><span class="kb">Maj + clic, ou </span>bouton « Sélection + » : isoler, masquer ou centrer plusieurs structures</td></tr>
+<tr><td>Mes vues</td><td>Onglet « Vues » : enregistre l'affichage et l'angle actuels pour y revenir d'un clic</td></tr>
 <tr class="kb"><td><kbd>Échap</kbd></td><td>Fermer / désélectionner</td></tr>
 <tr class="kb"><td><kbd>1</kbd>–<kbd>4</kbd> <kbd>↵</kbd></td><td>Quiz : répondre · question suivante</td></tr>
 </table></div></aside>
@@ -260,6 +263,6 @@ select option{color:#111}
 window.addEventListener('error',e=>{const m=document.getElementById('splashMsg');if(m&&document.getElementById('splash').style.opacity!=='0'){m.className='err';
   m.textContent=location.protocol==='file:'?"Ouvre l'appli avec « Lancer l'atlas.command » (double-clic), pas en ouvrant index.html directement.":'Erreur de chargement : '+(e.message||'réseau')}} ,true);
 </script>
-<script type="module" src="app.js?v=32"></script>
+<script type="module" src="app.js?v=41"></script>
 </body>
 </html>
