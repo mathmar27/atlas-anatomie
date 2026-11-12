@@ -19,7 +19,7 @@ const LS={get(k,d){try{const v=localStorage.getItem('atlas.'+k);return v==null?d
 // ------------------------------------------------------------------ réglages
 const MOBILE=matchMedia('(pointer:coarse)').matches||Math.min(innerWidth,innerHeight)<600;
 const DEF={shadows:!MOBILE,shadowStrength:.65,ground:true,detail:MOBILE?0:1,exposure:1.05,quality:'auto',fov:30,zoom:1,rotate:1,invertZoom:false,inertia:true,
- pin:1,halo:1,labels:!MOBILE,ghost:.07,tips:true,latin:true,english:false,sex:'m'};
+ pin:1,halo:1,labels:!MOBILE,ghost:.07,tips:true,pqmode:'pins',latin:true,english:false,sex:'m'};
 const CFG=Object.assign({},DEF,LS.get('cfg',{}));
 // ------------------------------------------------------------------ morphologie féminine (déformation du modèle de base)
 const SEX='m',SCL=1;
@@ -828,6 +828,7 @@ const ROWS=[['h','Affichage'],['tog','shadows','Ombres portées'],['rng','shadow
  ['rng','fov','Perspective',14,60,1],
  ['h','Navigation'],['rng','zoom','Vitesse du zoom',.3,4,.1],['rng','rotate','Vitesse de rotation',.3,2.5,.1],['tog','invertZoom','Inverser le sens du zoom'],['tog','inertia','Inertie des mouvements'],
  ['h','Reliefs osseux'],['rng','pin','Taille des pastilles',.6,1.8,.1],['seg','halo','Halos colorés',[[0,'Aucun'],[1,'Normal'],[1.6,'Large']]],['tog','labels','Étiquettes autour de l\'os'],
+ ['h','Quiz'],['seg','pqmode','Répondre avec',[['pins','Pastilles'],['hover','Survol de la structure']]],
  ['h','Noms'],['tog','latin','Noms latins'],['tog','english','Noms anglais'],
  ['h','Divers'],['rng','ghost','Opacité des structures estompées',.02,.35,.01],['tog','tips','Nom au survol de la souris']];
 function applyCfg(k){
@@ -961,7 +962,7 @@ function quizKey(e,k){
   if(/^[1-4]$/.test(k)&&!Q.answered){const b=$$('#qzOpts button')[+k-1];if(b)b.click()}}
 
 // ------------------------------------------------------------------ navigateur (Atlas / Quiz) et quiz à pastilles
-const NAV={on:false,mode:'atlas',stack:[],grid:LS.get('navgrid',true),q:'',f:'all',last:null},PQ={on:false,mode:LS.get('pqmode','pins'),pins:[],items:[],queue:[],ok:0,ko:0,def:null,hv:-1,errs:new Set()},PQB=LS.get('pq',{});
+const NAV={on:false,mode:'atlas',stack:[],grid:LS.get('navgrid',true),q:'',f:'all',last:null},PQ={on:false,get mode(){return CFG.pqmode==='hover'?'hover':'pins'},pins:[],items:[],queue:[],ok:0,ko:0,def:null,hv:-1,errs:new Set()},PQB=LS.get('pq',{});
 const NSYS=[['squelette','Os · système squelettique'],['articulations','Articulations · système articulaire'],['muscles','Muscles'],['vaisseaux','Cœur et vaisseaux'],['nerfs','Système nerveux'],['visceres','Viscères']];
 const NREG=[['tc','Tête et cou'],['tr','Tronc'],['ms','Membre supérieur'],['mi','Membre inférieur']];
 function regOf(p){if(p.sys.id==='squelette'){const g=/trapezoid/i.test(p.en)?'msup':boneGroup(p.en);return g==='crane'?'tc':g==='msup'?'ms':g==='minf'?'mi':/^(Atlas|Axis|Vertebra C)/.test(p.base)?'tc':'tr'}
@@ -1116,7 +1117,7 @@ const passF=c=>{if(!c.quiz||NAV.mode!=='quiz'||NAV.f==='all')return true;const b
 const SEG=(attr,cur,opts)=>`<div class="seg">${opts.map(([k,l])=>`<button data-${attr}="${k}" class="${cur===k?'on':''}">${l}</button>`).join('')}</div>`;
 function quizHead(){const ids=Object.keys(PQB),n=ids.length,ok=ids.filter(k=>PQB[k]>=80).length,avg=n?Math.round(ids.reduce((a,k)=>a+PQB[k],0)/n):0;
   return`<div class="qh"><div class="qhStats"><div><b>${n}</b><span>quiz faits</span></div><div><b>${ok}</b><span>maîtrisés</span></div><div><b>${n?avg+' %':'—'}</b><span>score moyen</span></div></div>
-  <div class="qhOpts"><label><span>Répondre avec</span>${SEG('nh',PQ.mode,[['pins','◉ Pastilles'],['hover','☝ Survol de la structure']])}</label><label><span>Afficher</span>${SEG('nf',NAV.f,[['all','Tous'],['todo','À faire'],['redo','À revoir'],['ok','Maîtrisés']])}</label></div>
+  <div class="qhOpts"><label><span>Afficher</span>${SEG('nf',NAV.f,[['all','Tous'],['todo','À faire'],['redo','À revoir'],['ok','Maîtrisés']])}</label></div>
   ${NAV.last?`<button class="qhLast" data-nh="last">▶ Reprendre « ${esc(NAV.last.title)} »</button>`:''}</div>`}
 function navRender(){const pg=NAV.stack[NAV.stack.length-1],el=$('#nav');if(!pg){el.classList.remove('on');NAV.on=false;return}
   NAV.cards=[];const q=norm(NAV.q);let h=pg.head&&NAV.mode==='quiz'?quizHead():'';
@@ -1182,10 +1183,9 @@ function pqClear(){for(const sp of PQ.pins){pinG.remove(sp);sp.material.map.disp
   for(const it of PQ.items)if(it.part&&it.part.pqDone){it.part.pqDone=false;apply(it.part)}
   for(const p of PQ.tinted||[])for(const m of p.meshes)if(m.material.userData.base0){m.material.userData.base.copy(m.material.userData.base0);m.material.userData.base0=null}
   if(PQ.haloB){for(const m of PQ.haloB.meshes){m.material.userData.halo=false;m.material.needsUpdate=true}PQ.haloB=null;LMU.uLmSel.value=-1}(PQ.tinted||[]).forEach(apply);PQ.tinted=[]}
-const MODEBTN=()=>SEG('p',PQ.mode==='pins'?'m:pins':'m:hover',[['m:pins','◉ Pastilles'],['m:hover','☝ Survol de la structure']]);
 function pqPaint(end){const el=$('#pq'),d=PQ.def,n=PQ.items.length;el.classList.add('on');
   if(end){const pc=Math.round(PQ.ok/(PQ.ok+PQ.ko)*100),er=[...PQ.errs].map(i=>PQ.items[i].fr);el.innerHTML=`<div class="pqT">${esc(d.title)}</div><div class="score" style="color:${pc>=80?'var(--ok)':pc>=50?'var(--gold)':'var(--ko)'}">${pc} %</div><div class="mut">${PQ.ok} justes · ${PQ.ko} erreur${PQ.ko>1?'s':''} · meilleur score ${PQB[d.id]} %</div>${er.length?`<div class="pqE"><b>À revoir :</b> ${er.map(esc).join(' · ')}</div>`:''}<div class="pqB"><button class="on" data-p="again">Recommencer</button>${er.length?'<button data-p="errs">Refaire les erreurs</button>':''}<button data-p="nav">Autres quiz</button><button data-p="quit">Quitter</button></div>`;return}
-  if(!PQ.started){el.innerHTML=`<div class="pqT">${esc(d.title)}</div><div class="mut">${n} ${d.bone?'reliefs':'structures'} · ${PQ.mode==='pins'?'clique la pastille qui correspond au nom affiché':'survole le modèle : la structure sous le pointeur s\'éclaire, clique celle qui correspond au nom affiché'}. Tu peux tourner et zoomer.</div><div class="pqM"><span class="mut">Répondre avec</span>${MODEBTN()}</div><div class="pqB"><button class="on" data-p="go">Prêt · commencer le quiz !</button></div>`;return}
+  if(!PQ.started){el.innerHTML=`<div class="pqT">${esc(d.title)}</div><div class="mut">${n} ${d.bone?'reliefs':'structures'} · ${PQ.mode==='pins'?'clique la pastille qui correspond au nom affiché':'survole le modèle : la structure sous le pointeur s\'éclaire, clique celle qui correspond au nom affiché'}. Tu peux tourner et zoomer.</div><div class="pqB"><button class="on" data-p="go">Prêt · commencer le quiz !</button></div>`;return}
   const it=PQ.items[PQ.queue[0]],done=n-PQ.queue.length;el.innerHTML=`<div class="pqP"><i style="width:${done/n*100}%"></i></div><div class="pqQ"><b>${esc(it.fr)}</b>${LA(it.la)?`<span class="la">${esc(it.la)}</span>`:''}</div><div class="pqS"><span class="ok">✓ ${PQ.ok}</span><span class="ko">✗ ${PQ.ko}</span><span class="mut">${done} / ${n}</span><button data-p="skip" title="Passer cette question (comptée comme erreur)">Passer</button></div>`}
 function pqHover(i){if(PQ.hv===i)return;PQ.hv=i;if(PQ.def.bone){LMU.uLmSel.value=i;invalidate()}else setHover(i>=0?PQ.items[i].part:null)}
 // survol : la structure (ou la zone du relief) sous le pointeur, si elle fait partie du quiz
@@ -1217,10 +1217,10 @@ function pqQuit(toNav){pqClear();PQ.on=INPQ=false;document.body.classList.remove
   if(PQ.cam)tw={t0:performance.now(),ms:500,p0:camera.position.clone(),p1:PQ.cam[0],q0:controls.target.clone(),q1:PQ.cam[1]};invalidate();if(toNav)navOpen('quiz')}
 $('#pqTop').addEventListener('click',e=>{const b=e.target.closest('[data-p]');if(!b)return;if(b.dataset.p==='quit')pqQuit(true);else pqStart(PQ.def)});
 $('#pq').addEventListener('click',e=>{const b=e.target.closest('[data-p]');if(!b)return;const a=b.dataset.p;
-  if(a.startsWith('m:')){PQ.mode=a.slice(2);LS.set('pqmode',PQ.mode);pqStart(PQ.def)}else if(a==='go'){PQ.started=true;pqPaint()}else if(a==='skip')pqSkip();else if(a==='errs')pqErrs();else if(a==='quit')pqQuit();else if(a==='nav')pqQuit(true);else pqStart(PQ.def)});
+  if(a==='go'){PQ.started=true;pqPaint()}else if(a==='skip')pqSkip();else if(a==='errs')pqErrs();else if(a==='quit')pqQuit();else if(a==='nav')pqQuit(true);else pqStart(PQ.def)});
 $('#navBody').addEventListener('click',e=>{const f=e.target.closest('[data-nf]'),m=e.target.closest('[data-nh]');
   if(f){NAV.f=f.dataset.nf;navRender();return}
-  if(m){const a=m.dataset.nh;if(a==='last'){if(NAV.last)pqStart(NAV.last)}else{PQ.mode=a;LS.set('pqmode',a);navRender()}return}
+  if(m){if(NAV.last)pqStart(NAV.last);return}
   const b=e.target.closest('.ncard');if(b)NAV.cards[+b.dataset.i].go()});
 $('#navBackBtn').onclick=()=>NAV.stack.length>1?navBack():navClose();$('#navClose').onclick=navClose;$('#navGrid').onclick=()=>{NAV.grid=!NAV.grid;LS.set('navgrid',NAV.grid);navRender()};
 $('#navSearch').oninput=e=>{NAV.q=e.target.value;navRender()};$('#navSearch').addEventListener('keydown',e=>e.stopPropagation());
