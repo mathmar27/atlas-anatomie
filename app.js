@@ -130,7 +130,7 @@ function loop(t){
   if(!dirty){lastT=t;return}
   if(moving){if(t-lastT>34)slow++;else slow=Math.max(0,slow-1);if(slow>6){if(curDpr>1){curDpr=1;renderer.setPixelRatio(1);renderer.setSize(innerWidth,innerHeight,false)}slow=0}}
   if(clip.on&&capsDirty)rebuildCaps();
-  lastT=t;dirty=false;const still=!moving&&!tw&&t-lastZoom>200;updateLight(still);if(still&&CFG.shadows)renderer.shadowMap.needsUpdate=true;updatePins();renderer.render(scene,camera);layoutLabels()}
+  lastT=t;dirty=false;const still=!moving&&!tw&&t-lastZoom>200;updateLight(still);if(still&&CFG.shadows)renderer.shadowMap.needsUpdate=true;updatePins();pqUpdatePins();renderer.render(scene,camera);layoutLabels()}
 
 // ------------------------------------------------------------------ données
 let CAT={names:{},landmarks:{}};
@@ -274,19 +274,21 @@ function ingest(gltf,s){
     if(s.id==='insertions'){mat.polygonOffset=true;mat.polygonOffsetFactor=-3;mat.polygonOffsetUnits=-3}
     if(SEX==='f')warpMesh(o,name);
     mat.userData.base=base;o.material=mat;o.userData.part=p;p.meshes.push(o);o.matrixAutoUpdate=false});
-  root.traverse(o=>{o.matrixAutoUpdate=false});world.add(root)}
+  // hiérarchie aplatie : dans les modèles, certains maillages sont enfants d'autres (ex. artère radiale sous l'artère brachiale) ; masquer le parent masquait les enfants
+  const ms=[];root.traverse(o=>{if(o.isMesh&&o.parent!==root)ms.push(o)});for(const m of ms)root.attach(m);
+  root.traverse(o=>{o.matrixAutoUpdate=false});root.updateMatrixWorld(true);world.add(root)}
 const title=p=>p.ins?(p.ins.type==='o'?'Origine — ':'Terminaison — ')+(p.fr||p.en):(p.fr||p.en);
 const sideFr=p=>p.side==='r'?'droite':p.side==='l'?'gauche':'';
 function pbox(p){if(!p.box){p.box=new THREE.Box3();for(const m of p.meshes){if(!m.geometry.boundingBox)m.geometry.computeBoundingBox();p.box.union(m.geometry.boundingBox.clone().applyMatrix4(m.matrixWorld))}p.center=p.box.getCenter(new THREE.Vector3());p.radius=p.box.getSize(new THREE.Vector3()).length()/2}return p.box}
-const GOLD=new THREE.Color(0xffa41f),GREEN=new THREE.Color(0x4fd47f),RED=new THREE.Color(0xf0604e);
+const GOLD=new THREE.Color(0xffa41f),GREEN=new THREE.Color(0x4fd47f),RED=new THREE.Color(0xf0604e),HOVC=new THREE.Color(0x63c8ff);let INPQ=false;
 function apply(p){
   const vis=p.sys.on&&!p.hidden,sel=(p===S.sel||S.multi.has(p))&&!p.lmOn,hov=p===S.hov;
   for(const m of p.meshes){m.visible=vis;const mt=m.material;
     if(mt.transparent!==p.ghost){mt.transparent=p.ghost;mt.depthWrite=!p.ghost;mt.needsUpdate=true}
-    mt.opacity=p.ghost?CFG.ghost:1;m.renderOrder=p.ghost?5:0;m.castShadow=!p.ghost;
+    mt.opacity=p.ghost?(p.cg?(p.sys.id==='squelette'?.2:.1):CFG.ghost):1;m.renderOrder=p.ghost?5:0;m.castShadow=!p.ghost;
     if(p.flash){mt.color.copy(p.flash>0?GREEN:RED);mt.emissive.copy(mt.color).multiplyScalar(.25)}
     else if(sel){mt.color.copy(mt.userData.base).lerp(GOLD,.82);mt.emissive.setRGB(.26,.13,.0)}
-    else{mt.color.copy(mt.userData.base);if(hov)mt.emissive.setRGB(.06,.085,.08);else mt.emissive.setRGB(0,0,0)}}
+    else{mt.color.copy(mt.userData.base);if(p.pqDone)mt.color.lerp(GREEN,.55);if(hov&&INPQ){mt.color.lerp(HOVC,.5);mt.emissive.setRGB(.03,.07,.1)}else if(hov)mt.emissive.setRGB(.06,.085,.08);else mt.emissive.setRGB(0,0,0)}}
   pickDirty=visDirty=capsDirty=true;invalidate()}
 const WHITEISH=new THREE.Color(0xf1e9d8);
 const applyAll=()=>parts.forEach(apply);
@@ -310,7 +312,8 @@ function loadSys(s){
   return s.promise}
 async function setSys(s,on){
   if(on&&s.state!=='ready'){try{await loadSys(s)}catch{return}}
-  s.on=on;s.parts.forEach(apply);sysRow(s);buildTree();if(!on&&S.sel&&S.sel.sys===s)select(null)}
+  s.on=on;if(on&&CURV&&!s.internal){let n=0;for(const p of s.parts){if(p.ins)continue;p.ghost=false;p.hidden=defHidden(p)||!CURV.f(p);if(!p.hidden)n++}toast((SHORT[s.id]||s.label)+' : '+n+' structure'+(n>1?'s':'')+' de la vue « '+CURV.n+' »')}
+  s.parts.forEach(apply);sysRow(s);buildTree();if(!on&&S.sel&&S.sel.sys===s)select(null)}
 
 // accélération du pointage (BVH), chargée en option
 import('https://cdn.jsdelivr.net/npm/three-mesh-bvh@0.7.0/build/index.module.js').then(m=>{
@@ -323,11 +326,13 @@ const rc=new THREE.Raycaster(),ndc=new THREE.Vector2();
 const clip={on:false,axis:'x',flip:false,plane:new THREE.Plane(new THREE.Vector3(-1,0,0),0),box:null};
 function pick(ev,pins=true){
   const r=canvas.getBoundingClientRect();ndc.set((ev.clientX-r.left)/r.width*2-1,-(ev.clientY-r.top)/r.height*2+1);rc.setFromCamera(ndc,camera);
-  if(PQ.on){const h=rc.intersectObjects(PQ.pins.filter(s=>s.visible),false);return h.length?{pq:h[0].object.userData.i}:null}
+  if(PQ.on){if(PQ.mode==='pins'){const h=rc.intersectObjects(PQ.pins.filter(s=>s.visible&&!s.userData.done&&!s.userData.occ),false);return h.length?{pq:h[0].object.userData.i}:null}return pqMap(pickParts())}
   if(pins&&LM.bone){const h=rc.intersectObjects(LM.pins.filter(s=>s.visible),false);if(h.length)return{lm:h[0].object.userData.i}}
-  if(pickDirty){pickables=[];for(const p of parts)if(p.sys.on&&!p.hidden&&!p.ghost)for(const m of p.meshes)pickables.push(m);pickDirty=false}
+  return pickParts()}
+function pickList(){if(pickDirty){pickables=[];for(const p of parts)if(p.sys.on&&!p.hidden&&!p.ghost)for(const m of p.meshes)pickables.push(m);pickDirty=false}return pickables}
+function pickParts(){
   rc.firstHitOnly=!clip.on;
-  const hits=rc.intersectObjects(pickables,false);
+  const hits=rc.intersectObjects(pickList(),false);
   if(clip.on&&clip.plane.distanceToPoint(camera.position)<0){const X=new THREE.Vector3();
     if(rc.ray.intersectPlane(clip.plane,X)){const tX=X.distanceTo(rc.ray.origin),cnt=new Map();
       for(const h of hits){const p=h.object.userData.part;if(h.distance>tX&&p.capped)cnt.set(p,(cnt.get(p)||0)+1)}
@@ -339,11 +344,11 @@ let down=null,hovRaf=0,lastMove=null;
 canvas.addEventListener('pointerdown',e=>{down={x:e.clientX,y:e.clientY,b:e.button};$('#results').classList.remove('on')});
 canvas.addEventListener('pointerup',e=>{if(!down)return;const d=Math.hypot(e.clientX-down.x,e.clientY-down.y),b=down.b;down=null;if(d<5&&b===0)onClick(e)});
 canvas.addEventListener('pointermove',e=>{lastMove=e;if(e.buttons||moving)return;if(!hovRaf)hovRaf=requestAnimationFrame(()=>{hovRaf=0;onHover(lastMove)})});
-canvas.addEventListener('pointerleave',()=>{setHover(null);setLmHover(-1);hideTip()});
+canvas.addEventListener('pointerleave',()=>{if(PQ.on&&PQ.mode==='hover')pqHover(-1);else setHover(null);setLmHover(-1);hideTip()});
 canvas.addEventListener('dblclick',e=>{const h=pick(e,false);if(h&&h.part&&!Q.on){select(h.part);focusSel()}});
 function setHover(p){if(S.hov===p)return;const o=S.hov;S.hov=p;if(o)apply(o);if(p)apply(p)}
 function onHover(e){
-  const h=pick(e);canvas.style.cursor=h?(DIS?'crosshair':'pointer'):'';if(PQ.on){hideTip();return}
+  const h=pick(e);canvas.style.cursor=h?(DIS?'crosshair':'pointer'):'';if(PQ.on){hideTip();if(PQ.mode==='hover')pqHover(h&&PQ.started?h.pq:-1);return}
   if(h&&h.lm!==undefined){setHover(null);setLmHover(h.lm);if(!Q.on||Q.answered){const L=LM.list[h.lm];showTip(e,L.fr||L.en,LA(L.la))}else hideTip();return}
   setLmHover(-1);
   if(Q.on&&(Q.mode==='lmname'||Q.mode==='lmfind')){setHover(null);hideTip();return}
@@ -365,8 +370,11 @@ let toastT=0;function toast(m){const t=$('#toast');t.textContent=m;t.style.displ
 
 // ------------------------------------------------------------------ sélection, visibilité, annulation
 const undoStack=[];
-const snap=()=>({on:SYS.map(s=>s.on),st:parts.map(p=>(p.hidden?1:0)|(p.ghost?2:0))});
-function restore(sn){SYS.forEach((s,i)=>{s.on=sn.on[i]&&s.state==='ready'});parts.forEach((p,i)=>{const v=sn.st[i];if(v===undefined){p.hidden=defHidden(p);p.ghost=false}else{p.hidden=!!(v&1);p.ghost=!!(v&2)}});applyAll();SYS.forEach(sysRow);buildTree()}
+let CURV=null;// vue active : les systèmes ajoutés ensuite n'affichent que cette zone
+function boxPred(ps,pad=.03){const b=new THREE.Box3();ps.forEach(p=>b.union(pbox(p)));b.expandByScalar(pad);return p=>{pbox(p);return b.containsPoint(p.center)}}
+function setCurv(n,f){CURV=n&&f?{n,f}:null;const el=$('#curv');if(el){el.classList.toggle('on',!!CURV);if(CURV)el.querySelector('span').textContent='Vue : '+CURV.n}}
+const snap=()=>({on:SYS.map(s=>s.on),st:parts.map(p=>(p.hidden?1:0)|(p.ghost?2:0)),cv:CURV});
+function restore(sn){setCurv(sn.cv&&sn.cv.n,sn.cv&&sn.cv.f);SYS.forEach((s,i)=>{s.on=sn.on[i]&&s.state==='ready'});parts.forEach((p,i)=>{p.cg=false;const v=sn.st[i];if(v===undefined){p.hidden=defHidden(p);p.ghost=false}else{p.hidden=!!(v&1);p.ghost=!!(v&2)}});applyAll();SYS.forEach(sysRow);buildTree()}
 const redoStack=[];const pushUndo=()=>{undoStack.push(snap());if(undoStack.length>40)undoStack.shift();redoStack.length=0};
 function redo(){if(Q.on)return;const s=redoStack.pop();if(!s){toast('Rien à rétablir');return}undoStack.push(snap());exOff();restore(s);card()}
 function undo(){if(Q.on)return;const s=undoStack.pop();if(!s){toast('Rien à annuler');return}if(INS.owner)closeIns(true);redoStack.push(snap());restore(s);if(LM.bone&&(LM.bone.hidden||!LM.bone.sys.on))closeLm();card()}
@@ -383,7 +391,7 @@ function isolate(p){pushUndo();for(const q of parts){q.ghost=false;q.hidden=q.in
   if(CAT.landmarks[p.name]&&LM.bone!==p)openLm(p);focusSel();card()}
 function hideSel(){const p=S.sel;if(!p)return;pushUndo();p.hidden=true;apply(p);select(null);markTree()}
 function ghostOthers(){const p=S.sel;if(!p)return;pushUndo();const any=parts.some(q=>q.ghost&&q!==p);for(const q of parts)if(q!==p&&!q.ins)q.ghost=!any;p.ghost=false;applyAll();card()}
-function showAll(){if(Q.on)return;pushUndo();exOff();if(INS.owner)closeIns(true);for(const p of parts){p.hidden=defHidden(p);p.ghost=false}applyAll();buildTree();card()}
+function showAll(){if(Q.on)return;pushUndo();setCurv();exOff();if(INS.owner)closeIns(true);for(const p of parts){p.hidden=defHidden(p);p.ghost=false}applyAll();buildTree();card()}
 
 // ------------------------------------------------------------------ reliefs osseux
 const LM={bone:null,list:[],pins:[],sel:-1,hov:-1,quiz:false};
@@ -539,7 +547,7 @@ function card(){
 const FAV=LS.get('fav',{});const pkey=p=>p.sys.id+'|'+p.base;
 function toggleFav(){const p=S.sel;if(!p||p.ins)return;const k=pkey(p);if(FAV[k])delete FAV[k];else FAV[k]=title(p);LS.set('fav',FAV);toast(FAV[k]?'Ajouté aux favoris':'Retiré des favoris');card();buildTree()}
 function showOnly(pred,label,sys,forceDef){
-  if(Q.on)return;pushUndo();if(INS.owner)closeIns(true);if(sys)SYS.forEach(s=>{if(!s.internal)s.on=s===sys});
+  if(Q.on)return;pushUndo();setCurv();if(INS.owner)closeIns(true);if(sys)SYS.forEach(s=>{if(!s.internal)s.on=s===sys});
   for(const q of parts){q.ghost=false;q.hidden=!!q.ins||(!forceDef&&defHidden(q))||!pred(q)}
   if(S.sel){S.sel.hidden=false}
   applyAll();SYS.forEach(sysRow);buildTree();if(LM.bone&&(LM.bone.hidden||!LM.bone.sys.on))closeLm();fitAll();card();toast(label+' — « Tout afficher » (A) pour revenir')}
@@ -788,7 +796,7 @@ function saveView(){const n=$('#mvName').value.trim()||'Vue '+(MYV.length+1),on=
   for(const p of parts)if(p.sys.on&&!p.ins)(p.hidden?hid:vis).push(p.name);
   MYV.push(Object.assign({n,on,opt:Object.keys(OPT).filter(k=>OPT[k]),cam:[...camera.position.toArray(),...controls.target.toArray()].map(x=>+x.toFixed(4))},vis.length<=hid.length?{vis}:{hid}));LS.set('myviews',MYV);viewsPane();toast('Vue « '+n+' » enregistrée')}
 async function loadView(v){if(Q.on)return;for(const k of v.opt||[])await enableOpt(k);for(const id of v.on)if(SYSID[id])try{await loadSys(SYSID[id])}catch{return}
-  pushUndo();exOff();closeLm();if(INS.owner)closeIns(true);select(null);SYS.forEach(s=>{if(!s.internal)s.on=v.on.includes(s.id)});const set=new Set(v.vis||v.hid);
+  pushUndo();setCurv();exOff();closeLm();if(INS.owner)closeIns(true);select(null);SYS.forEach(s=>{if(!s.internal)s.on=v.on.includes(s.id)});const set=new Set(v.vis||v.hid);
   for(const p of parts){p.ghost=false;p.hidden=!!p.ins||(v.vis?!set.has(p.name):set.has(p.name))}applyAll();SYS.forEach(sysRow);buildTree();
   tw={t0:performance.now(),ms:700,p0:camera.position.clone(),p1:new THREE.Vector3(...v.cam.slice(0,3)),q0:controls.target.clone(),q1:new THREE.Vector3(...v.cam.slice(3))};invalidate();if(innerWidth<=820)leftOpen(false)}
 $('#pane-views').addEventListener('click',e=>{const m=e.target.closest('button');if(m&&m.id==='mvSave'){saveView();return}if(m&&m.dataset.mvdel!==undefined){MYV.splice(+m.dataset.mvdel,1);LS.set('myviews',MYV);viewsPane();return}if(m&&m.dataset.mv!==undefined){loadView(MYV[+m.dataset.mv]);return}
@@ -799,10 +807,11 @@ async function applyView(V){
   pushUndo();exOff();closeLm();if(INS.owner)closeIns(true);select(null);
   let c=null;if(v.sph){const b=parts.find(p=>p.name===v.sph[0]);pbox(b);c=new THREE.Vector3((b.box.min.x+b.box.max.x)/2,(v.sph[1]?b.box.max.y-.02:b.box.min.y)+(v.sph[3]||0),(b.box.min.z+b.box.max.z)/2+(v.sph[4]||0))}
   SYS.forEach(s=>{if(!s.internal)s.on=all.includes(s.id)});
+  const zone=p=>{pbox(p);return c?(p.box.distanceToPoint(c)<v.sph[2]*.5||p.center.distanceTo(c)<v.sph[2]):v.box?(p.center.y>=v.box[0]*SCL&&p.center.y<=v.box[1]*SCL&&(!v.ax||Math.abs(p.center.x)<v.ax)):v.re.test(p.name)};
   for(const p of parts){p.ghost=false;if(p.ins){p.hidden=true;continue}if(!p.sys.on)continue;pbox(p);
     if(v.ctx&&p.sys.id==='squelette'&&!ids.includes('squelette')){p.hidden=false;p.ghost=true;continue}
-    const ok=c?(p.box.distanceToPoint(c)<v.sph[2]*.5||p.center.distanceTo(c)<v.sph[2]):v.box?(p.center.y>=v.box[0]*SCL&&p.center.y<=v.box[1]*SCL&&(!v.ax||Math.abs(p.center.x)<v.ax)):v.re.test(p.name);
-    p.hidden=!ok||defHidden(p)}
+    p.hidden=!zone(p)||defHidden(p)}
+  setCurv(V[0],v.re?boxPred(parts.filter(p=>p.sys.on&&!p.hidden&&!p.ghost),.02):zone);
   applyAll();SYS.forEach(sysRow);buildTree();
   const b=new THREE.Box3();for(const p of parts)if(p.sys.on&&!p.hidden&&!p.ghost)b.union(c?p.box.clone().intersect(new THREE.Box3().setFromCenterAndSize(c,new THREE.Vector3(1,1,1).multiplyScalar(v.sph[2]*2.4))):p.box);
   if(!b.isEmpty())flyTo(b.getCenter(new THREE.Vector3()),b.getSize(new THREE.Vector3()).length()/2,new THREE.Vector3(...(v.dir||[0,0,1])),700);
@@ -952,11 +961,11 @@ function quizKey(e,k){
   if(/^[1-4]$/.test(k)&&!Q.answered){const b=$$('#qzOpts button')[+k-1];if(b)b.click()}}
 
 // ------------------------------------------------------------------ navigateur (Atlas / Quiz) et quiz à pastilles
-const NAV={on:false,mode:'atlas',stack:[],grid:LS.get('navgrid',true),q:''},PQ={on:false,pins:[],items:[],queue:[],ok:0,ko:0,def:null},PQB=LS.get('pq',{});
+const NAV={on:false,mode:'atlas',stack:[],grid:LS.get('navgrid',true),q:'',f:'all',last:null},PQ={on:false,mode:LS.get('pqmode','pins'),pins:[],items:[],queue:[],ok:0,ko:0,def:null,hv:-1,errs:new Set()},PQB=LS.get('pq',{});
 const NSYS=[['squelette','Os · système squelettique'],['articulations','Articulations · système articulaire'],['muscles','Muscles'],['vaisseaux','Cœur et vaisseaux'],['nerfs','Système nerveux'],['visceres','Viscères']];
 const NREG=[['tc','Tête et cou'],['tr','Tronc'],['ms','Membre supérieur'],['mi','Membre inférieur']];
 function regOf(p){if(p.sys.id==='squelette'){const g=/trapezoid/i.test(p.en)?'msup':boneGroup(p.en);return g==='crane'?'tc':g==='msup'?'ms':g==='minf'?'mi':/^(Atlas|Axis|Vertebra C)/.test(p.base)?'tc':'tr'}
-  pbox(p);const c=p.center,ax=Math.abs(c.x);if(p.sys.id==='visceres')return c.y>1.43?'tc':'tr';if(c.y>1.43&&ax<.14)return'tc';if(ax>.2||(ax>.15&&c.y>.95&&c.y<1.43&&p.radius<.2))return'ms';if(c.y<.84)return'mi';return'tr'}
+  const g=grpOf(p);if(g&&GREG[g])return GREG[g];pbox(p);const c=p.center,ax=Math.abs(c.x);if(p.sys.id==='visceres')return c.y>1.43?'tc':'tr';if(c.y>1.43&&ax<.14)return'tc';if(ax>.2||(ax>.15&&c.y>.95&&c.y<1.43&&p.radius<.2))return'ms';if(c.y<.84)return'mi';return'tr'}
 function catOf(p,r){const n=p.base.toLowerCase();
   if(r==='tc')return/tooth|incisor|canine|molar|premolar/.test(n)?'Dents':/vertebra|atlas|axis/.test(n)?'Vertèbres cervicales':/cartilage|hyoid/.test(n)?'Larynx, os hyoïde et cartilages':'Os du crâne et de la face';
   if(r==='tr')return/costal cartilage/.test(n)?'Cartilages costaux':/vertebra|sacrum|coccyx/.test(n)?'Colonne vertébrale':'Côtes et sternum';
@@ -969,92 +978,256 @@ function nearBones(ps,pad=.025){const b=new THREE.Box3(),left=ps.every(p=>p.side
   return SYSID.squelette.parts.filter(q=>!defHidden(q)&&pbox(q).intersectsBox(b)&&!(ps.every(p=>p.side==='r')&&q.side==='l')&&!(left&&q.side==='r'))}
 const BANDS={tc:[['Tête',1.5],['Cou',-9]],tr:[['Thorax',1.12],['Abdomen et région lombaire',.98],['Pelvis',-9]],ms:[['Épaule et bras',1.17],['Coude et avant-bras',.9],['Poignet et main',-9]],mi:[['Hanche et cuisse',.5],['Genou et jambe',.12],['Cheville et pied',-9]]};
 const regParts=(s,r)=>s.parts.filter(p=>!p.ins&&!defHidden(p)&&regOf(p)===r&&!((r==='ms'||r==='mi')&&p.side==='l'));
+// groupes anatomiques nommés (d'après le nom anglais du modèle) : séries de quiz et sections de l'atlas, comme Anatomy Learning
+const GRP={
+ muscles:[
+  ['Muscles de l\'œil',/^(superior|inferior|medial|lateral) (rectus|oblique) muscle$|levator palpebrae|trochlea of superior oblique|common tendinous ring|tarsus$/i],
+  ['Muscles de la face',/frontalis|occipitalis|epicranial|temporoparietalis|procerus|nasalis|depressor|levator (anguli|labii|nasolabialis)|zygomaticus|risorius|orbicularis|bucinator|mentalis|corrugator|platysma/i],
+  ['Muscles masticateurs',/masseter|temporalis muscle|pterygoid|temporal fascia/i],
+  ['Langue, pharynx et larynx',/glossus|pharyn|arytenoid|cricothyroid/i],
+  ['Muscles supra-hyoïdiens',/digastric|mylohyoid|geniohyoid|stylohyoid/i],
+  ['Muscles infra-hyoïdiens',/sternohyoid|sternothyroid|thyrohyoid|omohyoid/i],
+  ['Muscles sous-occipitaux',/rectus posterior|obliquus (inferior|superior) capitis/i],
+  ['Muscles du cou',/sternocleidomastoid|scalen|longus (capitis|colli)|rectus (anterior|lateralis) capitis|cervical fascia/i],
+  ['Muscles profonds du dos',/iliocostalis|longissimus|spinalis|multifidus|rotatores|interspinales|intertransversarii|splenius|levatores|thoracolumbar/i],
+  ['Muscles superficiels du dos',/trapezius|latissimus|rhomboid|levator scapulae|serratus posterior/i],
+  ['Muscles du thorax',/pectoralis|subclavius|serratus anterior|intercostal|transversus thoracis|pectoral fascia|clavipectoral|diaphragm/i],
+  ['Muscles de l\'abdomen',/abdominal oblique|rectus abdominis|transversus abdominis|pyramidalis|quadratus lumborum|linea alba|inguinal ligament|abdominal fascia|transversalis/i],
+  ['Plancher pelvien',/levator ani|coccygeus|pubo-analis|anal sphincter/i],
+  ['Épaule et coiffe des rotateurs',/intertubercular|deltoid|supraspinatus|infraspinatus|teres (major|minor)|subscapularis|subacromial|subdeltoid|coracobrachial bursa|acromial bursa/i],
+  ['Muscles du bras',/biceps brachii|brachialis|coracobrachialis|triceps|anconeus|septum of arm|brachial fascia|bicipitoradial/i],
+  ['Muscles de la main',/abductor pollicis brevis|flexor pollicis brevis|opponens pollicis|opponens digiti minimi muscle of hand|adductor pollicis|digiti minimi of hand|interossei muscles of hand|palmar interossei|lumbrical muscles of hand|palmar aponeurosis|fascia of hand|digits? of hand|metacarpal ligament/i],
+  ['Avant-bras · loge antérieure',/pronator|flexor carpi|palmaris longus|flexor digitorum (superficialis|profundus)|flexor pollicis longus|common flexor tendon|flexor retinaculum of wrist/i],
+  ['Avant-bras · loges postérieure et latérale',/brachioradialis|extensor carpi|^extensor digitorum$|^extensor digiti minimi$|extensor indicis|extensor pollicis|abductor pollicis longus|supinator|wrist|antebrachial|carpi|manus|abd\. pollicis|extensor digitorum and/i],
+  ['Fessiers et pelvi-trochantériens',/gluteus|gluteal|piriformis|gemellus|obturator|quadratus femoris|tensor fasciae|sciatic bursa|trochanteric bursa/i],
+  ['Muscles de la hanche (iliopsoas)',/psoas|iliacus|iliopectineal|iliopsoas/i],
+  ['Cuisse · loge antérieure',/sartorius|rectus femoris|vastus|patell|fascia lata|iliotibial|femoral intermuscular/i],
+  ['Cuisse · loge médiale (adducteurs)',/adductor (brevis|longus|magnus|minimus)|gracilis|pectineus/i],
+  ['Cuisse · loge postérieure (ischio-jambiers)',/biceps femoris|semitendinosus|semimembranosus|anserine/i],
+  ['Muscles du pied',/of foot|hallucis brevis|abductor hallucis|adductor hallucis|extensor digitorum brevis|flexor digitorum brevis|quadratus plantae|plantar aponeurosis|plantar interossei|metatarsal ligament/i],
+  ['Jambe · loges antérieure et latérale',/tibialis anterior|extensor (digitorum|hallucis) longus|fibular|extensor retinaculum of ankle|anterior intermuscular septum of leg/i],
+  ['Jambe · loge postérieure',/gastrocnemius|soleus|plantaris|popliteus|tibialis posterior|flexor (digitorum|hallucis) longus|calcaneal|flexor retinaculum of ankle|popliteal fascia|crural fascia|septum of leg|malleolus|tibia/i]],
+ articulations:[
+  ['Articulation temporo-mandibulaire',/temporomandibular|sphenomandibular|stylomandibular|pterygospinous/i],
+  ['Larynx et os hyoïde',/thyrohyoid|cricothyroid|cricopharyngeal|quadrangular|stylohyoid/i],
+  ['Disques intervertébraux cervicaux',/(disc|pulposus) C/],['Disques intervertébraux thoraciques',/(disc|pulposus) T/],['Disques intervertébraux lombaires',/(disc|pulposus) L/],
+  ['Ligaments du rachis',/longitudinal ligament|ligamenta flava|interspinous|supraspinous|intertransverse|nuchal|iliolumbar/i],
+  ['Côtes et sternum',/head of rib|costotransverse|intercostal membrane/i],
+  ['Épaule et ceinture scapulaire',/glenohumeral|glenoid labrum|coracohumeral|coraco-acromial|acromioclavicular|sternoclavicular|interclavicular|costoclavicular|conoid|trapezoid ligament|transverse scapular|transverse humeral/i],
+  ['Coude et avant-bras',/elbow|annular ligament|^(radial|ulnar) collateral ligament$|interosseous membrane of forearm|oblique cord|quadrate ligament|radio-ulnar/i],
+  ['Main et doigts',/metacarp|of hand|^articular capsules of (proximal|distal) interphalangeal joints$|palmar interphalangeal/i],
+  ['Poignet et carpe',/radiocarpal|ulnocarpal|carp|scapho|luno|lunate|triquetr|capitate|hamate|pis[io]|trapezi|wrist/i],
+  ['Bassin',/sacro-iliac|sacrospinous|sacrotuberous|pubic|symphysis|obturator membrane|intercornual|triradiate/i],
+  ['Hanche',/acetabul|hip joint|iliofemoral|ischiofemoral|pubofemoral|head of femur|zona orbicularis|frenula/i],
+  ['Cheville',/talofibular|calcaneofibular|tibiotalar|tibionavicular|tibiocalcaneal|(anterior|posterior|transverse) tibiofibular|interosseous membrane of leg/i],
+  ['Genou',/knee|cruciate|menisc|tibial collateral|fibular collateral|popliteal ligament|popliteofibular|infrapatellar|fibular head|superior tibiofibular/i],
+  ['Pied et orteils',/tars|cune|cuboid|navicular|calcan|talo|toe|of foot|plantar|intersesamoid/i]],
+ vaisseaux:[
+  ['Cœur',/atrium|ventricle|leaflet|papillary|coronary|cardiac vein|interventricular|of heart|inferolateral branch/i],
+  ['Vaisseaux pulmonaires',/lung|lobar artery|pulmonary/i],
+  ['Aorte, veines caves et troncs',/aort|vena cava|brachiocephalic|azygos|common carotid|subclavian|superior intercostal vein|superior phrenic vein/i],
+  ['Artères de l\'encéphale',/cerebral|cerebellar|communicating|basilar artery|callosomarginal|pericallosal|striate|sulcus|gyrus|prefrontal|parietal|frontobasal|orbitofrontal|(lateral|medial) occipital artery|temporal branch$|temporo-occipital|postcentral|insular|pontine|anterior spinal/i],
+  ['Sinus veineux de la dure-mère',/sinus|intercavernous|venous plexus/i],
+  ['Œil et orbite',/ophthalmic|ciliary|retinal|lacrimal|ethmoidal|supra-orbital|supratrochlear/i],
+  ['Face, crâne et cou',/carotid|facial|lingual|maxillary|temporal|alveolar|palatine|labial|angular|submental|occipital|auricular|pharyngeal|meningeal|buccal|pterygoid|sphenopalatine|infra-orbital|jugular|retromandibular|thyroid|mental|mylohyoid|vertebral|thyrocervical|costocervical|cervical/i],
+  ['Épaule et aisselle',/axillary|thoraco-acromial|lateral thoracic|subscapular|circumflex scapular|thoracodorsal|circumflex humeral|suprascapular|pectoral branches/i],
+  ['Bras et coude',/brachial|collateral artery|cephalic|basilic|cubital/i],
+  ['Avant-bras',/radial|ulnar|interosseous|antebrachial/i],
+  ['Main',/palmar|carpal|metacarpal|of hand/i],
+  ['Paroi du thorax et de l\'abdomen',/intercostal|thoracic|musculophrenic|epigastric|subcostal|phrenic/i],
+  ['Tube digestif, foie et rate',/coeliac|gastric|hepatic|splenic|mesenteric|colic|ileal|appendicular|sigmoid|anorectal|gastroduodenal|pancreaticoduodenal|gastro-omental|portal|marginal/i],
+  ['Reins et paroi postérieure',/renal|suprarenal|testicular|lumbar/i],
+  ['Pelvis',/iliac|gluteal|pudendal|obturator|penis|sacral/i],
+  ['Pied',/plantar|pedis|tarsal|arcuate|metatarsal|of foot|calcaneal|intercapitular/i],
+  ['Hanche et cuisse',/femoral|great saphenous/i],
+  ['Genou et jambe',/popliteal|genicular|tibial|fibular|patellar|small saphenous/i]],
+ nerfs:[
+  ['Nerfs crâniens',/nerve \((I|II|III|IV|V|VI|VII|VIII|IX|X|XI|XII)\)|chorda tympani|maxillary nerve|ophthalmic nerve|mandibular nerve|alveolar nerve|lingual nerve|buccal nerve|mental nerve|nerve to mylohyoid|cochlear nerve|vestibular nerve|trigeminal|optic (chiasm|tract)/i],
+  ['Œil et oreille',/eyeball|cornea|iris|lens|retina|sclera|vitreous|ciliary|zonular|lacrimal|nasolacrimal|cochlea|vestibule$|tympanic|auditory tube/i],
+  ['Noyaux gris centraux et diencéphale',/caudate|lentiform|putamen|globus|thalam|hypothal|habenula|mamillary|amygdal|hippocamp|fornix|septal|stria|red nucleus|septum pellucidum/i],
+  ['Cervelet',/vermis|lobule|culmen|declive|flocculus|tonsil of cerebellum|lingula|cerebellar peduncle|nodule/i],
+  ['Tronc cérébral',/medulla|pons|midbrain|peduncle|olive|colliculus|interpeduncular|aqueduct|geniculate|nucleus|nuclei/i],
+  ['Cortex : gyrus et sillons',/gyr|sulc|pole|cuneus|insula|temporal plane|lat_fis|opercular|triangular part|orbital part/i],
+  ['Ventricules, méninges et commissures',/ventricle|choroid|commissure|corpus callosum|falx|tentorium|central canal|dura/i],
+  ['Moelle spinale',/tract|fasciculus|horn of spinal|spinal cord|intermediolateral|intermediomedial|lateral intermediate|nucleus proprius|reticular process|root of spinal|spinal ganglion|cauda equina|posterolateral/i],
+  ['Plexus brachial',/brachial plexus|pectoral nerve|long thoracic|thoracodorsal|subscapular nerve|suprascapular|dorsal scapular|subclavian nerve/i],
+  ['Nerfs de la main',/digital branches of (median|ulnar|radial)|palmar branch|dorsal branch of ulnar|(deep|superficial) branch of ulnar/i],
+  ['Nerfs du bras et de l\'avant-bras',/axillary|musculocutaneous|brachial cutaneous|antebrachial|interosseous nerve|median nerve|ulnar nerve|radial nerve/i],
+  ['Nerfs du tronc',/intercostal|iliohypogastric|ilio-inguinal|genitofemoral|sympathetic|pudendal/i],
+  ['Nerfs du pied',/plantar|of foot|digital branches of (deep|superficial) fibular/i],
+  ['Nerfs de la jambe',/tibial nerve|fibular|sural/i],
+  ['Plexus lombaire et sacral, cuisse',/femoral|obturator|sciatic|gluteal|piriformis|quadratus femoris|saphenous/i]],
+ visceres:[
+  ['Bouche, glandes salivaires et pharynx',/tongue|gingiva|palate|parotid|sublingual|submandibular|pharynx|epiglottis/i],
+  ['Cavité nasale',/nasal/i],
+  ['Poumons et bronches',/lung|bronch|trachea|pleura/i],
+  ['Glandes endocrines',/thyroid|parathyroid|hypophysis|pineal|suprarenal/i],
+  ['Œsophage et estomac',/oesophagus|stomach/i],
+  ['Intestins et péritoine',/duoden|jejun|ileum|colon|appendix|taenia|meso|omentum/i],
+  ['Foie, voies biliaires et pancréas',/liver|gallbladder|bile|pancrea/i],
+  ['Appareil urinaire',/kidney|renal|ureter|bladder|urethra/i],
+  ['Appareil génital masculin',/penis|testis|epididym|deferens|ejaculat|seminal|prostate/i]]};
+const GREG={'Épaule et coiffe des rotateurs':'ms','Muscles du bras':'ms','Fessiers et pelvi-trochantériens':'mi','Muscles de la hanche (iliopsoas)':'mi','Plancher pelvien':'tr','Muscles profonds du dos':'tr','Muscles superficiels du dos':'tr','Muscles du thorax':'tr','Muscles de l\'abdomen':'tr',
+  'Muscles de l\'œil':'tc','Muscles de la face':'tc','Muscles masticateurs':'tc','Langue, pharynx et larynx':'tc','Muscles supra-hyoïdiens':'tc','Muscles infra-hyoïdiens':'tc','Muscles sous-occipitaux':'tc','Muscles du cou':'tc',
+  'Épaule et ceinture scapulaire':'ms','Hanche':'mi','Bassin':'tr','Côtes et sternum':'tr','Ligaments du rachis':'tr','Disques intervertébraux cervicaux':'tc','Articulation temporo-mandibulaire':'tc','Larynx et os hyoïde':'tc',
+  'Épaule et aisselle':'ms','Bras et coude':'ms','Hanche et cuisse':'mi','Pelvis':'tr','Artères de l\'encéphale':'tc','Sinus veineux de la dure-mère':'tc','Œil et orbite':'tc','Cœur':'tr','Vaisseaux pulmonaires':'tr',
+  'Plexus brachial':'ms','Nerfs du bras et de l\'avant-bras':'ms','Plexus lombaire et sacral, cuisse':'mi','Nerfs du tronc':'tr','Moelle spinale':'tr','Nerfs crâniens':'tc','Œil et oreille':'tc','Cortex : gyrus et sillons':'tc','Cervelet':'tc','Tronc cérébral':'tc','Noyaux gris centraux et diencéphale':'tc','Ventricules, méninges et commissures':'tc'};
+const grpOf=p=>{if(p._g!==undefined)return p._g;const G=GRP[p.sys.id],n=p.base[0]==='('?p.base.slice(1,-1):p.base,g=G&&G.find(x=>x[1].test(n));return p._g=g?g[0]:null};
+const bandOf=(p,r)=>BANDS[r].find(b=>p.center.y>=b[1]*SCL)[0];
+// regroupe les structures d'une région : groupe nommé, sinon bande de hauteur ; les groupes trop petits rejoignent leur bande
+function groupsOf(s,r,ps){const bone=s.id==='squelette',m=new Map();for(const p of ps){pbox(p);const g=bone?catOf(p,r):grpOf(p)||bandOf(p,r);if(!m.has(g))m.set(g,[]);m.get(g).push(p)}
+  if(!bone)for(const [g,a] of [...m])if(a.length<3&&m.size>1&&!BANDS[r].some(b=>b[0]===g)){m.delete(g);for(const p of a){const k=bandOf(p,r);if(!m.has(k))m.set(k,[]);m.get(k).push(p)}}
+  if(!bone){const my=a=>a.reduce((t,p)=>t+p.center.y,0)/a.length;for(const [g,a] of [...m])if(a.length<3&&m.size>1){m.delete(g);for(const p of a){let bk=null,bd=1e9;for(const [k,b] of m){const d=Math.abs(my(b)-p.center.y);if(d<bd){bd=d;bk=k}}m.get(bk).push(p)}}}
+  return m}
+const QS=new Map();
+function quizSets(s,r){if(s.state!=='ready')return{sets:[],pool:[]};const key=s.id+'|'+r+'|'+JSON.stringify(OPT);if(QS.has(key))return QS.get(key);const bone=s.id==='squelette',out=[];
+  const pool=uniq(regParts(s,r)).filter(p=>p.fr&&pbox(p)).sort((a,b)=>b.center.y-a.center.y);
+  for(const [g,a] of groupsOf(s,r,pool))chunks(a,bone?14:12).forEach((c,i,all)=>{const t=g+(all.length>1?' · '+(i+1)+'/'+all.length:'');out.push({g,t,c,id:s.id+'|'+r+'|'+t})});
+  const res={sets:out,pool};QS.set(key,res);return res}
+// contexte d'une série : os voisins (pleins) + structures voisines estompées (muscles, organes)
+function ctxOf(s,c){if(s.id==='squelette')return{solid:[],gh:[]};let solid=nearBones(c);const gh=[],set=new Set(c),b=new THREE.Box3();c.forEach(p=>b.union(pbox(p)));
+  const R=s.id==='muscles'||s.id==='visceres'?s:s.id==='vaisseaux'||s.id==='nerfs'?SYSID.visceres:null,right=c.every(p=>p.side!=='l');
+  if(R&&R.state==='ready'){const mr=Math.max(...c.map(p=>p.radius))*1.6,bc=b.getCenter(new THREE.Vector3());for(const q of R.parts){if(set.has(q)||q.ins||defHidden(q)||(right&&q.side==='l')||q.radius>mr)continue;if(pbox(q).intersectsBox(b))gh.push(q)}
+    gh.sort((a,b2)=>a.center.distanceTo(bc)-b2.center.distanceTo(bc));gh.length=Math.min(gh.length,30)}
+  // os qui cachent la cible vue de face (cage thoracique, voûte du crâne…) : estompés au lieu d'être pleins
+  if(s.id==='vaisseaux'||s.id==='nerfs'||s.id==='visceres'){const d=new THREE.Vector3(.3,.1,1).normalize(),rr=new THREE.Raycaster(),hid=new Set(),ms=solid.flatMap(q=>q.meshes);
+    for(const p of c){rr.set(p.center,d);for(const h of rr.intersectObjects(ms,false))hid.add(h.object.userData.part)}
+    if(hid.size){for(const q of hid)gh.push(q);solid=solid.filter(q=>!hid.has(q))}}
+  return{solid,gh}}
 // vignettes : rendu hors écran de la structure, mis en cache
-const THS=LS.get('th5',{}),TH=new Map(Object.entries(THS)),thQ=[];let thRT=null,thBusy=false;const thCam=new THREE.PerspectiveCamera(26,1,.01,20);
-function thumb(key,ps,img,ctx){if(TH.has(key)){img.src=TH.get(key);return}thQ.push([key,ps,img,ctx]);if(!thBusy){thBusy=true;setTimeout(thRun,30)}}
-function thRun(){const job=thQ.shift();if(!job){thBusy=false;return}const [key,ps,img,ctx]=job;
-  if(!TH.has(key)&&ps.length){const N=176;thRT=thRT||new THREE.WebGLRenderTarget(N,N,{colorSpace:THREE.SRGBColorSpace});const set=new Set(ctx?ps.concat(ctx):ps),sv=[],bx=new THREE.Box3();
-    for(const p of parts)for(const m of p.meshes){sv.push(m,m.visible,m.material.transparent,m.material.opacity);m.visible=set.has(p);if(m.visible){m.material.transparent=false;m.material.opacity=1}}
-    ps.forEach(p=>bx.union(pbox(p)));const c=bx.getCenter(new THREE.Vector3()),sz=bx.getSize(new THREE.Vector3()),r=Math.max(sz.y,Math.hypot(sz.x,sz.z))/2*1.08,d=new THREE.Vector3(ps.length>1?.45:.25,.1,1).normalize();
+const THS=LS.get('th7',{}),TH=new Map(Object.entries(THS)),thQ=[];let thRT=null,thBusy=false;const thCam=new THREE.PerspectiveCamera(26,1,.01,20);
+function thumb(key,ps,img,ctx,gh){if(TH.has(key)){img.src=TH.get(key);return}thQ.push([key,ps,img,ctx,gh]);if(!thBusy){thBusy=true;setTimeout(thRun,30)}}
+function thRun(){const job=thQ.shift();if(!job){thBusy=false;return}const [key,ps,img,ctx,gh]=job;
+  if(!TH.has(key)&&ps.length){const N=176;thRT=thRT||new THREE.WebGLRenderTarget(N,N,{colorSpace:THREE.SRGBColorSpace});const set=new Set(ctx?ps.concat(ctx):ps),gs=new Set(gh||[]),sv=[],bx=new THREE.Box3();
+    for(const p of parts)for(const m of p.meshes){const mt=m.material;sv.push(m,m.visible,mt.transparent,mt.opacity,mt.depthWrite);const g=!set.has(p)&&gs.has(p);m.visible=set.has(p)||g;if(m.visible){mt.transparent=g;mt.opacity=g?(p.sys.id==='squelette'?.2:.1):1;mt.depthWrite=!g}}
+    ps.forEach(p=>bx.union(pbox(p)));const c=bx.getCenter(new THREE.Vector3()),sz=bx.getSize(new THREE.Vector3()),r=Math.max(Math.max(sz.y,Math.hypot(sz.x,sz.z))/2*1.08,ctx&&ctx.length?.045:0),d=new THREE.Vector3(ps.length>1?.45:.25,.1,1).normalize();
     thCam.position.copy(c).addScaledVector(d,r/Math.sin(13*Math.PI/180)*1.02);thCam.lookAt(c);thCam.near=.01;thCam.far=30;thCam.updateProjectionMatrix();thCam.updateMatrixWorld();
     const pv=pinG.visible,cv=capG.visible,gv=ground.visible,cl=renderer.clippingPlanes;pinG.visible=capG.visible=ground.visible=false;renderer.clippingPlanes=[];
     for(const L of[sun,sun2]){L.position.copy(c).add(new THREE.Vector3(-.5,.72,.62).applyQuaternion(thCam.quaternion).multiplyScalar(3));L.target.position.copy(c);L.target.updateMatrixWorld();L.updateMatrixWorld()}
     renderer.setRenderTarget(thRT);renderer.setClearColor(0,0);renderer.clear();renderer.render(scene,thCam);const px=new Uint8Array(N*N*4);renderer.readRenderTargetPixels(thRT,0,0,N,N,px);renderer.setRenderTarget(null);
-    pinG.visible=pv;capG.visible=cv;ground.visible=gv;renderer.clippingPlanes=cl;for(let i=0;i<sv.length;i+=4){sv[i].visible=sv[i+1];sv[i].material.transparent=sv[i+2];sv[i].material.opacity=sv[i+3]}
-    const cvs=document.createElement('canvas');cvs.width=cvs.height=N;const x=cvs.getContext('2d'),im=x.createImageData(N,N);for(let y=0;y<N;y++)im.data.set(px.subarray((N-1-y)*N*4,(N-y)*N*4),y*N*4);x.putImageData(im,0,0);TH.set(key,cvs.toDataURL());if(/^[a-z]+\|(tc|tr|ms|mi)$/.test(key)){THS[key]=TH.get(key);LS.set('th5',THS)}invalidate()}
+    pinG.visible=pv;capG.visible=cv;ground.visible=gv;renderer.clippingPlanes=cl;for(let i=0;i<sv.length;i+=5){const m=sv[i];m.visible=sv[i+1];m.material.transparent=sv[i+2];m.material.opacity=sv[i+3];m.material.depthWrite=sv[i+4]}
+    const cvs=document.createElement('canvas');cvs.width=cvs.height=N;const x=cvs.getContext('2d'),im=x.createImageData(N,N);for(let y=0;y<N;y++)im.data.set(px.subarray((N-1-y)*N*4,(N-y)*N*4),y*N*4);x.putImageData(im,0,0);TH.set(key,cvs.toDataURL());if(/^[a-z]+\|(tc|tr|ms|mi)$/.test(key)){THS[key]=TH.get(key);LS.set('th7',THS)}invalidate()}
   if(TH.has(key)&&img.isConnected)img.src=TH.get(key);setTimeout(thRun,12)}
 // pages
-const pill=id=>{const b=PQB[id];return`<span class="pill" title="${b===undefined?'Pas encore fait':'Meilleur score : '+b+' %'}"><i style="width:${b||0}%;background:${b>=80?'var(--ok)':b>=50?'var(--gold)':'var(--ko)'}"></i></span>`};
-function navCard(c,i){return`<button class="ncard" data-i="${i}"><img alt="" data-th="${i}"><span>${esc(c.t)}${c.sub?`<small>${esc(c.sub)}</small>`:''}</span>${c.quiz?pill(c.quiz.id):''}</button>`}
+const scCls=b=>b===undefined?'nw':b>=80?'ok':b>=50?'mid':'ko';
+function navCard(c,i){const b=c.quiz?PQB[c.quiz.id]:undefined,sc=c.quiz?`<em class="sc ${scCls(b)}">${b===undefined?'Nouveau':b+' %'}</em>`:c.prog?`<em class="sc pr">${c.prog}</em>`:'';
+  return`<button class="ncard${c.quiz?' qz':''}" data-i="${i}">${sc}<img alt="" data-th="${i}"><span>${esc(c.t)}${c.sub?`<small>${esc(c.sub)}</small>`:''}</span></button>`}
+const passF=c=>{if(!c.quiz||NAV.mode!=='quiz'||NAV.f==='all')return true;const b=PQB[c.quiz.id];return NAV.f==='todo'?b===undefined:NAV.f==='redo'?b!==undefined&&b<80:b>=80};
+const SEG=(attr,cur,opts)=>`<div class="seg">${opts.map(([k,l])=>`<button data-${attr}="${k}" class="${cur===k?'on':''}">${l}</button>`).join('')}</div>`;
+function quizHead(){const ids=Object.keys(PQB),n=ids.length,ok=ids.filter(k=>PQB[k]>=80).length,avg=n?Math.round(ids.reduce((a,k)=>a+PQB[k],0)/n):0;
+  return`<div class="qh"><div class="qhStats"><div><b>${n}</b><span>quiz faits</span></div><div><b>${ok}</b><span>maîtrisés</span></div><div><b>${n?avg+' %':'—'}</b><span>score moyen</span></div></div>
+  <div class="qhOpts"><label><span>Répondre avec</span>${SEG('nh',PQ.mode,[['pins','◉ Pastilles'],['hover','☝ Survol de la structure']])}</label><label><span>Afficher</span>${SEG('nf',NAV.f,[['all','Tous'],['todo','À faire'],['redo','À revoir'],['ok','Maîtrisés']])}</label></div>
+  ${NAV.last?`<button class="qhLast" data-nh="last">▶ Reprendre « ${esc(NAV.last.title)} »</button>`:''}</div>`}
 function navRender(){const pg=NAV.stack[NAV.stack.length-1],el=$('#nav');if(!pg){el.classList.remove('on');NAV.on=false;return}
-  NAV.cards=[];const q=norm(NAV.q);let h='';
-  for(const sec of pg.secs){const cs=sec.cards.filter(c=>!q||norm(c.t+' '+(c.la||'')).includes(q));if(!cs.length)continue;h+=`<h2>${esc(sec.t)}</h2><div class="ngrid ${NAV.grid?'':'list'}">${cs.map(c=>navCard(c,NAV.cards.push(c)-1)).join('')}</div>`}
-  $('#navTitle').textContent=pg.t;$('#navBody').innerHTML=h||'<div class="note">Aucun résultat.</div>';$('#navBody').scrollTop=pg.sc||0;
+  NAV.cards=[];const q=norm(NAV.q);let h=pg.head&&NAV.mode==='quiz'?quizHead():'';
+  for(const sec of pg.secs){const cs=sec.cards.filter(c=>(!q||norm(c.t+' '+(c.la||'')+' '+(c.sub||'')).includes(q))&&passF(c));if(!cs.length)continue;h+=`<h2>${esc(sec.t)}${sec.n?`<small>${sec.n}</small>`:''}</h2><div class="ngrid ${NAV.grid?'':'list'}">${cs.map(c=>navCard(c,NAV.cards.push(c)-1)).join('')}</div>`}
+  $('#navTitle').textContent=pg.t;$('#navBody').innerHTML=h+(NAV.cards.length?'':'<div class="note">Aucun résultat'+(NAV.f!=='all'&&NAV.mode==='quiz'?' pour ce filtre':'')+'.</div>');$('#navBody').scrollTop=pg.sc||0;
   $$('#navTabs button').forEach(b=>b.classList.toggle('on',b.dataset.m===NAV.mode));$('#navGrid').textContent=NAV.grid?'☰':'▦';
-  NAV.cards.forEach((c,i)=>{const im=$(`#navBody [data-th="${i}"]`);if(TH.has(c.k))im.src=TH.get(c.k);else if(c.ps&&c.ps.length)thumb(c.k,c.ps,im,c.ctx);else if(c.sys){im.classList.add('ld');bgLoad(c.sys)}else im.classList.add('noth')})}
+  NAV.cards.forEach((c,i)=>{const im=$(`#navBody [data-th="${i}"]`);if(TH.has(c.k))im.src=TH.get(c.k);else if(c.ps&&c.ps.length)thumb(c.k,c.ps,im,c.ctx,c.gh);else if(c.sys){im.classList.add('ld');bgLoad(c.sys)}else im.classList.add('noth')})}
 let bgChain=Promise.resolve();const bgSeen=new Set();
 function bgLoad(s){if(bgSeen.has(s))return;bgSeen.add(s);bgChain=bgChain.then(()=>loadSys(s)).then(()=>{if(NAV.on&&NAV.stack.length===1){NAV.stack[0]=pageHome();navRender()}}).catch(()=>{})}
 function navOpen(mode){if(Q.on||PQ.on)return;if(mode)NAV.mode=mode;NAV.on=true;NAV.q='';$('#navSearch').value='';$('#nav').classList.add('on');NAV.stack=[];navPush(pageHome())}
 function navPush(pg){const cur=NAV.stack[NAV.stack.length-1];if(cur)cur.sc=$('#navBody').scrollTop;NAV.stack.push(pg);navRender()}
 function navBack(){NAV.stack.pop();NAV.q='';$('#navSearch').value='';navRender()}
 function navClose(){NAV.stack=[];navRender()}
-function pageHome(){const extra=NAV.mode==='quiz'?[{t:'Autres quiz',cards:MODES.map(m=>({t:m[1],sub:m[2],col:'var(--panel3)',go:()=>{navClose();Q.mode=m[0];quizStart()}}))}]
+function pageHome(){const qz=NAV.mode==='quiz',extra=qz?[{t:'Autres quiz',cards:MODES.map(m=>({t:m[1],sub:m[2],col:'var(--panel3)',go:()=>{navClose();Q.mode=m[0];quizStart()}}))}]
    :VIEWS.slice(0,1).concat(VIEWS.slice(2)).map(g=>({t:g[0],cards:g[1].map(v=>({t:v[0],col:'var(--panel3)',go:()=>{navClose();applyView(v)}}))})).concat([{t:'Mes vues',cards:MYV.map(v=>({t:v.n,col:'var(--panel3)',go:()=>{navClose();loadView(v)}})).concat([{t:'+ Enregistrer la vue actuelle',col:'var(--panel3)',go:()=>{saveView();navClose()}}])}]);
-  return{t:NAV.mode==='quiz'?'Quiz':'Atlas d\'anatomie',secs:NSYS.map(([id,lab])=>{const s=SYSID[id];return{t:lab,cards:NREG.map(([r,rl])=>({t:rl,k:id+'|'+r,ps:s.state==='ready'?regParts(s,r):null,ctx:id!=='squelette'?regParts(SYSID.squelette,r):null,sys:s,go:async()=>{toast('Chargement…');try{await loadSys(s)}catch{return}navPush(pageRegion(s,r,rl))}})).filter(c=>!c.ps||c.ps.length)}}).concat(extra)}}
+  return{t:qz?'Quiz':'Atlas d\'anatomie',head:qz,secs:NSYS.map(([id,lab])=>{const s=SYSID[id],rd=s.state==='ready';return{t:lab,cards:NREG.map(([r,rl])=>{const ps=rd?regParts(s,r):null;let sub='',prog='';
+      if(rd&&ps.length){if(qz){const Q2=quizSets(s,r),n=Q2.sets.length,d=Q2.sets.filter(x=>PQB[x.id]!==undefined).length,gs=new Set(Q2.sets.map(x=>x.g)).size;sub=n+' quiz · '+gs+' groupe'+(gs>1?'s':'');if(d)prog=d+' / '+n}else sub=ps.length+' structures'}
+      return{t:rl,sub,prog,k:id+'|'+r,ps,ctx:id!=='squelette'&&rd?regParts(SYSID.squelette,r):null,sys:s,go:async()=>{toast('Chargement…');try{await loadSys(s)}catch{return}navPush(pageRegion(s,r,rl))}}}).filter(c=>!c.ps||c.ps.length)}}).concat(extra)}}
 function uniq(ps){const m=new Map();for(const p of ps){if(p.side==='l')continue;if(!m.has(p.base))m.set(p.base,p)}return[...m.values()].sort((a,b)=>title(a).localeCompare(title(b),'fr'))}
 const chunks=(a,n)=>{const o=[];for(let i=0;i<a.length;i+=n)o.push(a.slice(i,i+n));if(o.length>1&&o[o.length-1].length<4)o[o.length-2].push(...o.pop());return o};
+const regPred=r=>p=>regOf(p)===r&&!((r==='ms'||r==='mi')&&p.side==='l');
+function quizCard(s,r,rl,q){const bone=s.id==='squelette',cx=ctxOf(s,q.c),names=q.c.slice(0,3).map(title).join(', ')+(q.c.length>3?'…':'');
+  return{t:q.t,sub:q.c.length+' structures : '+names,k:'q'+q.id,ps:q.c,ctx:bone?null:cx.solid,gh:cx.gh,quiz:{id:q.id},go:()=>pqStart({id:q.id,title:rl+' · '+q.t,sys:s,ctx:bone?regParts(s,r):q.c.concat(cx.solid),gh:cx.gh,parts:q.c})}}
 function pageRegion(s,r,rl){const ps=regParts(s,r),us=uniq(ps),bone=s.id==='squelette',secs=[],rb=bone?[]:regParts(SYSID.squelette,r);
-  if(NAV.mode==='atlas'){secs.push({t:'Vues',cards:[{t:'Survol',sub:ps.length+' structures',k:s.id+'|'+r,ps,ctx:rb,go:()=>viewSet(s,ps.concat(rb),rl)}]});
-    secs.push({t:bone?'Os':'Structures',cards:us.map(p=>({t:title(p),la:p.la,k:(bone?'p':'x')+p.id,ps:[p],ctx:bone?null:nearBones([p]),go:()=>bone?navPush(pageBone(s,p,ps)):viewPart(s,p,ps.concat(rb),'ctx')}))})}
-  else{const pool=us.filter(p=>p.fr&&pbox(p)).sort((a,b)=>b.center.y-a.center.y),sets=[],names=c=>c.slice(0,3).map(title).join(', ')+(c.length>3?'…':'');
-    if(bone){const m=new Map();for(const p of pool){const k=catOf(p,r);if(!m.has(k))m.set(k,[]);m.get(k).push(p)}for(const [k,a] of m)chunks(a,14).forEach((c,i,all)=>sets.push([k+(all.length>1?' · '+(i+1)+'/'+all.length:''),c]))}
-    else{const m=new Map();for(const p of pool){const k=BANDS[r].find(b=>p.center.y>=b[1]*SCL)[0];if(!m.has(k))m.set(k,[]);m.get(k).push(p)}for(const [k,a] of m)chunks(a,12).forEach((c,i,all)=>sets.push([k+(all.length>1?' · '+(i+1)+'/'+all.length:''),c]))}
-    secs.push({t:'Quiz : '+rl,cards:sets.map(([t,c],i)=>({t,sub:c.length+' structures : '+names(c),k:'q'+s.id+r+t,ps:c,ctx:bone?null:nearBones(c),quiz:{id:s.id+'|'+r+'|'+t},go:()=>pqStart({id:s.id+'|'+r+'|'+t,title:rl+' · '+t,sys:s,ctx:bone?ps:c.concat(nearBones(c)),parts:c})}))});
-    if(bone){const lb=us.filter(p=>(CAT.landmarks[p.name]||[]).length>=4);if(lb.length)secs.push({t:'Repères osseux',cards:lb.flatMap(p=>chunks(CAT.landmarks[p.name].map((L,i)=>i),12).map((c,i,a)=>({t:title(p)+lmPart(i,a.length),sub:lmSub(p,c),k:'p'+p.id,ps:[p],quiz:{id:'lm|'+p.base+'|'+i},go:()=>pqStart({id:'lm|'+p.base+'|'+i,title:title(p)+' · reliefs'+(a.length>1?' #'+(i+1):''),sys:s,bone:p,lm:c})})))})}}
-  return{t:s.label+' › '+rl,secs}}
+  if(NAV.mode==='atlas'){secs.push({t:'Vues',cards:[{t:'Survol',sub:ps.length+' structures',k:s.id+'|'+r,ps,ctx:rb,go:()=>viewSet(s,ps.concat(rb),rl,regPred(r))}]});
+    for(const [g,c] of groupsOf(s,r,us)){const cx=bone?null:nearBones(c),cards=c.length>1?[{t:'Vue du groupe',sub:c.length+' structures',k:'g'+s.id+r+g,ps:c,ctx:cx,go:()=>viewSet(s,c.concat(cx||[]),g,boxPred(c))}]:[];
+      secs.push({t:g,n:c.length,cards:cards.concat(c.sort((a,b)=>title(a).localeCompare(title(b),'fr')).map(p=>({t:title(p),la:p.la,k:(bone?'p':'x')+p.id,ps:[p],...(bone?{}:(cx=>({ctx:cx.solid,gh:cx.gh}))(ctxOf(s,[p]))),go:()=>bone?navPush(pageBone(s,p,ps)):viewPart(s,p,c.concat(cx||[]),'ctx')})))})}}
+  else{const Q2=quizSets(s,r),gm=new Map();for(const q of Q2.sets){if(!gm.has(q.g))gm.set(q.g,[]);gm.get(q.g).push(q)}
+    const allC=bone?null:nearBones(Q2.pool);
+    secs.push({t:'Quiz : '+rl,n:Q2.sets.length+' séries · '+gm.size+' groupes',cards:[{t:'Défi · 15 au hasard',sub:'tirées de toute la région ('+Q2.pool.length+')',k:s.id+'|'+r,ps,ctx:rb,quiz:{id:'defi|'+s.id+'|'+r},go:()=>{const c=shuffle(Q2.pool.slice()).slice(0,15),cx=ctxOf(s,c);pqStart({id:'defi|'+s.id+'|'+r,title:rl+' · Défi',sys:s,ctx:bone?ps:c.concat(cx.solid),gh:cx.gh,parts:c})}}]
+      .concat(Q2.pool.length<=40?[{t:'Toute la région',sub:Q2.pool.length+' structures',k:s.id+'|'+r,ps,ctx:rb,quiz:{id:'all|'+s.id+'|'+r},go:()=>pqStart({id:'all|'+s.id+'|'+r,title:rl+' · Toute la région',sys:s,ctx:bone?ps:Q2.pool.concat(allC),gh:[],parts:Q2.pool})}]:[])
+      .concat(Q2.sets.map(q=>quizCard(s,r,rl,q)))});
+    if(bone){const lb=us.filter(p=>(CAT.landmarks[p.name]||[]).length>=4);if(lb.length)secs.push({t:'Repères osseux',cards:lb.flatMap(p=>chunks(CAT.landmarks[p.name].map((L,i)=>i),12).map((c,i,a)=>({t:title(p)+lmPart(i,a.length),sub:lmSub(p,c),k:'p'+p.id,ps:[p],quiz:{id:'lm|'+p.base+'|'+i},go:()=>pqStart({id:'lm|'+p.base+'|'+i,title:title(p)+' · reliefs'+lmPart(i,a.length),sys:s,bone:p,lm:c})})))})}}
+  return{t:s.label+' › '+rl,head:NAV.mode==='quiz',secs}}
 function pageBone(s,p,ctx){const lm=CAT.landmarks[p.name]||[],v=[{t:'Survol',sub:'dans sa région',k:'c'+p.id,ps:ctx,go:()=>viewPart(s,p,ctx,'ctx')},{t:'Os isolé',k:'p'+p.id,ps:[p],go:()=>viewPart(s,p,ctx,'iso')}];
   if(lm.length)v.push({t:'Repères d\'os',sub:lm.length+' reliefs',k:'p'+p.id,ps:[p],go:()=>viewPart(s,p,ctx,'lm')});
-  const secs=[{t:title(p),cards:v}];if(lm.length>=4)secs.push({t:'Quiz',cards:chunks(lm.map((L,i)=>i),12).map((c,i,a)=>({t:'Reliefs'+lmPart(i,a.length),sub:lmSub(p,c),k:'p'+p.id,ps:[p],quiz:{id:'lm|'+p.base+'|'+i},go:()=>pqStart({id:'lm|'+p.base+'|'+i,title:title(p)+' · Quiz #'+(i+1),sys:s,bone:p,lm:c})}))});
+  const secs=[{t:title(p),cards:v}];if(lm.length>=4)secs.push({t:'Quiz',cards:chunks(lm.map((L,i)=>i),12).map((c,i,a)=>({t:'Reliefs'+lmPart(i,a.length),sub:lmSub(p,c),k:'p'+p.id,ps:[p],quiz:{id:'lm|'+p.base+'|'+i},go:()=>pqStart({id:'lm|'+p.base+'|'+i,title:title(p)+' · reliefs'+lmPart(i,a.length),sys:s,bone:p,lm:c})}))});
   return{t:title(p),secs}}
 const lmPart=(i,n)=>n<2?'':n===2?[' · moitié supérieure',' · moitié inférieure'][i]:n===3?[' · tiers supérieur',' · tiers moyen',' · tiers inférieur'][i]:' · partie '+(i+1)+'/'+n;
 const lmSub=(p,c)=>{const L=CAT.landmarks[p.name];return c.length+' reliefs : '+c.slice(0,3).map(i=>L[i].fr||L[i].en).join(', ')+'…'};
 function shuffleSeed(a,seed){let h=hash(seed);const r=()=>{h=Math.imul(h^(h>>>15),2246822507)+1|0;return((h>>>0)%1e6)/1e6};a=a.slice();for(let i=a.length-1;i>0;i--){const j=r()*(i+1)|0;[a[i],a[j]]=[a[j],a[i]]}return a}
-function showSet(s,ps){exOff();closeLm();if(INS.owner)closeIns(true);if(clip.on)setClip(false);select(null);const set=new Set(ps);const on=new Set(ps.map(p=>p.sys));on.add(s);SYS.forEach(x=>{if(!x.internal)x.on=on.has(x)});for(const p of parts){p.ghost=false;p.flash=0;p.hidden=!set.has(p)}applyAll();SYS.forEach(sysRow);buildTree()}
-function viewSet(s,ps,lab){pushUndo();showSet(s,ps);navClose();fitAll(new THREE.Vector3(0,0,1),600);toast(lab+' · Survol')}
-function viewPart(s,p,ctx,mode){pushUndo();showSet(s,mode==='ctx'?ctx:[p]);navClose();select(p);if(mode==='lm'){openLm(p);card()}focusSel();toast(title(p)+(mode==='lm'?' · Repères d\'os':mode==='iso'?' · isolé':' · Survol'))}
-// quiz à pastilles : toutes les pastilles sont affichées, on clique celle du nom demandé
-function pqStart(def){navClose();PQ.def=def;PQ.snap=PQ.on?PQ.snap:snap();PQ.cam=PQ.on?PQ.cam:[camera.position.clone(),controls.target.clone()];pqClear();
-  const s=def.sys,dir=new THREE.Vector3(0,.1,1).normalize(),rcq=new THREE.Raycaster();rcq.firstHitOnly=true;PQ.items=[];
-  if(def.bone){showSet(s,[def.bone]);openLm(def.bone);const L=LM.list.slice();closeLm();for(const i of def.lm)PQ.items.push({fr:L[i].fr||L[i].en,la:L[i].la,pos:L[i].s.clone().addScaledVector(L[i].n,.001),part:def.bone,css:L[i].css});
-    LMU.uLmSel.value=-1;for(const m of def.bone.meshes){m.material.userData.halo=true;m.material.needsUpdate=true}PQ.haloB=def.bone}
-  else{showSet(s,def.ctx);for(const p of def.parts){pbox(p);const o=p.center.clone().addScaledVector(dir,p.radius+.3);rcq.set(o,dir.clone().negate());const h=rcq.intersectObjects(p.meshes,false)[0];PQ.items.push({fr:title(p),la:p.la,pos:h?h.point.clone().addScaledVector(dir,.001):p.center.clone(),part:p})}
+function showSet(s,ps,gh=[]){exOff();closeLm();if(INS.owner)closeIns(true);if(clip.on)setClip(false);select(null);const set=new Set(ps),gs=new Set(gh);const on=new Set(ps.concat(gh).map(p=>p.sys));on.add(s);SYS.forEach(x=>{if(!x.internal)x.on=on.has(x)});
+  for(const p of parts){p.ghost=p.cg=gs.has(p)&&!set.has(p);p.flash=0;p.hidden=!set.has(p)&&!p.ghost}applyAll();SYS.forEach(sysRow);buildTree()}
+function viewSet(s,ps,lab,f){pushUndo();showSet(s,ps);navClose();setCurv(lab,f||boxPred(ps));fitAll(new THREE.Vector3(0,0,1),600);toast(lab+' · Survol')}
+function viewPart(s,p,ctx,mode){pushUndo();showSet(s,mode==='ctx'?ctx:[p]);navClose();setCurv(title(p),mode==='ctx'?boxPred(ctx,.01):boxPred([p]));select(p);if(mode==='lm'){openLm(p);card()}focusSel();toast(title(p)+(mode==='lm'?' · Repères d\'os':mode==='iso'?' · isolé':' · Survol'))}
+// quiz à pastilles ou au survol : on clique la pastille (ou la structure éclairée sous le pointeur) du nom demandé
+const ZONE=new THREE.Color(0x86c4e4);
+function pqStart(def){navClose();NAV.last=def;PQ.def=def;PQ.snap=PQ.on?PQ.snap:snap();PQ.cam=PQ.on?PQ.cam:[camera.position.clone(),controls.target.clone()];pqClear();
+  const s=def.sys,hov=PQ.mode==='hover',dir=new THREE.Vector3(0,.1,1).normalize(),rcq=new THREE.Raycaster();rcq.firstHitOnly=true;PQ.items=[];PQ.hv=-1;PQ.errs=new Set();
+  if(def.bone){showSet(s,[def.bone]);openLm(def.bone);const L=LM.list.slice();closeLm();
+    for(const i of def.lm){const l=L[i];PQ.items.push({fr:l.fr||l.en,la:l.la,pos:l.s.clone().addScaledVector(l.n,.001),s:l.s.clone(),n:l.n.clone(),r:hov?Math.max(l.r,.008):l.r,col:hov?ZONE.clone():l.col.clone(),part:def.bone,css:l.css,li:i})}
+    PQ.items.forEach((it,k)=>{if(k>=64)return;LMU.uLmP.value[k].copy(it.s);LMU.uLmN.value[k].copy(it.n);LMU.uLmC.value[k].set(it.col.r,it.col.g,it.col.b);LMU.uLmR.value[k]=it.r});LMU.uLmCount.value=Math.min(64,PQ.items.length);LMU.uLmSel.value=-1;
+    for(const m of def.bone.meshes){m.material.userData.halo=true;m.material.needsUpdate=true}PQ.haloB=def.bone}
+  else{showSet(s,def.ctx,def.gh||[]);for(const p of def.parts){pbox(p);const o=p.center.clone().addScaledVector(dir,p.radius+.3);rcq.set(o,dir.clone().negate());const h=rcq.intersectObjects(p.meshes,false)[0];PQ.items.push({fr:title(p),la:p.la,pos:h?h.point.clone().addScaledVector(dir,.001):p.center.clone(),part:p})}
     PQ.tinted=[];const keys=[...new Set(def.ctx.map(colKey))].sort();if(s.id==='squelette')def.ctx.forEach(p=>{const c=new THREE.Color(QPAL[keys.indexOf(colKey(p))%QPAL.length]);for(const m of p.meshes){const u=m.material.userData;if(/Cartilage|Teeth|Tendon/.test(p.mat)&&p.meshes.length>1)continue;u.base0=u.base0||u.base.clone();u.base.copy(c)}PQ.tinted.push(p);apply(p)})}
-  PQ.pins=PQ.items.map((it,i)=>{const sp=new THREE.Sprite(new THREE.SpriteMaterial({map:pqTex(it.css||'#ffffff'),depthTest:false,depthWrite:false,sizeAttenuation:false,transparent:true}));sp.position.copy(it.pos);sp.renderOrder=30;sp.userData.i=i;sp.scale.setScalar(.02*CFG.pin*THREE.MathUtils.clamp(camera.aspect*1.1,.6,1));pinG.add(sp);return sp});
-  PQ.on=true;PQ.ok=PQ.ko=0;PQ.queue=shuffle(PQ.items.map((_,i)=>i));PQ.started=false;document.body.classList.add('inpq');$('#card').classList.remove('on');
+  PQ.pins=hov?[]:PQ.items.map((it,i)=>{const sp=new THREE.Sprite(new THREE.SpriteMaterial({map:pqTex(it.css||'#ffffff'),depthTest:false,depthWrite:false,sizeAttenuation:false,transparent:true}));sp.position.copy(it.pos);sp.renderOrder=30;sp.userData.i=i;pinG.add(sp);return sp});
+  PQ.on=true;INPQ=true;PQ.ok=PQ.ko=0;PQ.queue=shuffle(PQ.items.map((_,i)=>i));PQ.started=false;document.body.classList.add('inpq');$('#card').classList.remove('on');canvas.style.cursor='';
   const b=new THREE.Box3();if(def.ctx)(s.id==='squelette'?def.ctx:def.parts).forEach(p=>b.union(pbox(p)));else PQ.items.forEach(it=>b.expandByPoint(it.pos));def.bone?flyTo(def.bone.center,def.bone.radius*1.1,new THREE.Vector3(0,0,1)):flyTo(b.getCenter(new THREE.Vector3()),Math.max(b.getSize(new THREE.Vector3()).length()/2*1.15,.1),new THREE.Vector3(0,0,1));pqPaint()}
-function pqTex(css){const c=document.createElement('canvas');c.width=c.height=64;const x=c.getContext('2d');x.beginPath();x.arc(32,32,23,0,7);x.fillStyle=css;x.fill();x.lineWidth=8;x.strokeStyle='#0b1114';x.stroke();
-  x.beginPath();x.arc(32,32,26.5,0,7);x.lineWidth=2;x.strokeStyle='rgba(255,255,255,.85)';x.stroke();const t=new THREE.CanvasTexture(c);t.colorSpace=THREE.SRGBColorSpace;return t}
-function pqClear(){for(const sp of PQ.pins){pinG.remove(sp);sp.material.map.dispose();sp.material.dispose()}PQ.pins=[];
+function pqTex(css,done){const c=document.createElement('canvas');c.width=c.height=64;const x=c.getContext('2d');x.beginPath();x.arc(32,32,23,0,7);x.fillStyle=css;x.fill();x.lineWidth=8;x.strokeStyle='#0b1114';x.stroke();
+  x.beginPath();x.arc(32,32,26.5,0,7);x.lineWidth=2;x.strokeStyle='rgba(255,255,255,.85)';x.stroke();if(done){x.beginPath();x.moveTo(21,33);x.lineTo(29,41);x.lineTo(44,24);x.lineWidth=6;x.lineCap='round';x.lineJoin='round';x.strokeStyle='#0b1114';x.stroke()}
+  const t=new THREE.CanvasTexture(c);t.colorSpace=THREE.SRGBColorSpace;return t}
+function pqClear(){for(const sp of PQ.pins){pinG.remove(sp);sp.material.map.dispose();sp.material.dispose()}PQ.pins=[];setHover(null);PQ.hv=-1;
+  for(const it of PQ.items)if(it.part&&it.part.pqDone){it.part.pqDone=false;apply(it.part)}
   for(const p of PQ.tinted||[])for(const m of p.meshes)if(m.material.userData.base0){m.material.userData.base.copy(m.material.userData.base0);m.material.userData.base0=null}
-  if(PQ.haloB){for(const m of PQ.haloB.meshes){m.material.userData.halo=false;m.material.needsUpdate=true}PQ.haloB=null}(PQ.tinted||[]).forEach(apply);PQ.tinted=[]}
+  if(PQ.haloB){for(const m of PQ.haloB.meshes){m.material.userData.halo=false;m.material.needsUpdate=true}PQ.haloB=null;LMU.uLmSel.value=-1}(PQ.tinted||[]).forEach(apply);PQ.tinted=[]}
+const MODEBTN=()=>SEG('p',PQ.mode==='pins'?'m:pins':'m:hover',[['m:pins','◉ Pastilles'],['m:hover','☝ Survol de la structure']]);
 function pqPaint(end){const el=$('#pq'),d=PQ.def,n=PQ.items.length;el.classList.add('on');
-  if(end){const pc=Math.round(PQ.ok/(PQ.ok+PQ.ko)*100);el.innerHTML=`<div class="pqT">${esc(d.title)}</div><div class="score" style="color:${pc>=80?'var(--ok)':pc>=50?'var(--gold)':'var(--ko)'}">${pc} %</div><div class="mut">${PQ.ok} justes · ${PQ.ko} erreur${PQ.ko>1?'s':''} · meilleur score ${PQB[d.id]} %</div><div class="pqB"><button class="on" data-p="again">Recommencer</button><button data-p="nav">Autres quiz</button><button data-p="quit">Quitter</button></div>`;return}
-  if(!PQ.started){el.innerHTML=`<div class="pqT">${esc(d.title)}</div><div class="mut">${n} pastilles · clique celle qui correspond au nom affiché. Tu peux tourner et zoomer.</div><div class="pqB"><button class="on" data-p="go">Prêt · commencer le quiz !</button></div>`;return}
-  const it=PQ.items[PQ.queue[0]];el.innerHTML=`<div class="pqQ"><b>${esc(it.fr)}</b>${LA(it.la)?`<span class="la">${esc(it.la)}</span>`:''}</div><div class="pqS"><span class="ok">✓ ${PQ.ok}</span><span class="ko">✗ ${PQ.ko}</span><span class="mut">${PQ.queue.length} restantes</span></div>`}
-function pqClick(h){if(!PQ.started||!h||h.pq===undefined||!PQ.queue.length)return;const want=PQ.queue[0],sp=PQ.pins[h.pq];
-  if(h.pq===want){PQ.ok++;sp.visible=false;PQ.queue.shift();const p=PQ.items[want].part;if(!PQ.def.bone){p.flash=1;apply(p);setTimeout(()=>{p.flash=0;apply(p)},500)}}
-  else{PQ.ko++;sp.material.color.set(0xff6050);setTimeout(()=>{sp.material.color.set(0xffffff);invalidate()},450);PQ.queue.push(PQ.queue.shift());toast('Non : c\'était « '+PQ.items[h.pq].fr+' »')}
-  invalidate();if(!PQ.queue.length){const pc=Math.round(PQ.ok/(PQ.ok+PQ.ko)*100);PQB[PQ.def.id]=Math.max(PQB[PQ.def.id]||0,pc);LS.set('pq',PQB);pqPaint(true)}else pqPaint()}
-function pqQuit(toNav){pqClear();PQ.on=false;document.body.classList.remove('inpq');$('#pq').classList.remove('on');parts.forEach(p=>p.flash=0);if(PQ.snap)restore(PQ.snap);
+  if(end){const pc=Math.round(PQ.ok/(PQ.ok+PQ.ko)*100),er=[...PQ.errs].map(i=>PQ.items[i].fr);el.innerHTML=`<div class="pqT">${esc(d.title)}</div><div class="score" style="color:${pc>=80?'var(--ok)':pc>=50?'var(--gold)':'var(--ko)'}">${pc} %</div><div class="mut">${PQ.ok} justes · ${PQ.ko} erreur${PQ.ko>1?'s':''} · meilleur score ${PQB[d.id]} %</div>${er.length?`<div class="pqE"><b>À revoir :</b> ${er.map(esc).join(' · ')}</div>`:''}<div class="pqB"><button class="on" data-p="again">Recommencer</button>${er.length?'<button data-p="errs">Refaire les erreurs</button>':''}<button data-p="nav">Autres quiz</button><button data-p="quit">Quitter</button></div>`;return}
+  if(!PQ.started){el.innerHTML=`<div class="pqT">${esc(d.title)}</div><div class="mut">${n} ${d.bone?'reliefs':'structures'} · ${PQ.mode==='pins'?'clique la pastille qui correspond au nom affiché':'survole le modèle : la structure sous le pointeur s\'éclaire, clique celle qui correspond au nom affiché'}. Tu peux tourner et zoomer.</div><div class="pqM"><span class="mut">Répondre avec</span>${MODEBTN()}</div><div class="pqB"><button class="on" data-p="go">Prêt · commencer le quiz !</button></div>`;return}
+  const it=PQ.items[PQ.queue[0]],done=n-PQ.queue.length;el.innerHTML=`<div class="pqP"><i style="width:${done/n*100}%"></i></div><div class="pqQ"><b>${esc(it.fr)}</b>${LA(it.la)?`<span class="la">${esc(it.la)}</span>`:''}</div><div class="pqS"><span class="ok">✓ ${PQ.ok}</span><span class="ko">✗ ${PQ.ko}</span><span class="mut">${done} / ${n}</span><button data-p="skip" title="Passer cette question (comptée comme erreur)">Passer</button></div>`}
+function pqHover(i){if(PQ.hv===i)return;PQ.hv=i;if(PQ.def.bone){LMU.uLmSel.value=i;invalidate()}else setHover(i>=0?PQ.items[i].part:null)}
+// survol : la structure (ou la zone du relief) sous le pointeur, si elle fait partie du quiz
+function pqMap(h){if(!h||!h.part)return null;const d=PQ.def;
+  if(d.bone){if(h.part!==d.bone||!h.point)return null;let bi=-1,bd=1e9;PQ.items.forEach((it,i)=>{if(it.done)return;const x=it.s.distanceTo(h.point);if(x<bd){bd=x;bi=i}});return bi>=0&&bd<Math.max(PQ.items[bi].r*1.6,.008)?{pq:bi}:null}
+  const i=PQ.items.findIndex(it=>it.part===h.part&&!it.done);return i>=0?{pq:i}:null}
+function pqMark(i,ok){const it=PQ.items[i],sp=PQ.pins[i],bone=!!PQ.def.bone;
+  if(ok){it.done=true;if(sp){sp.userData.done=true;sp.material.map.dispose();sp.material.map=pqTex('#4fd47f',true);sp.material.needsUpdate=true}
+    if(bone){if(i<64)LMU.uLmC.value[i].set(GREEN.r,GREEN.g,GREEN.b)}else{const p=it.part;p.pqDone=true;p.flash=1;apply(p);setTimeout(()=>{p.flash=0;apply(p)},450)}}
+  else{if(sp){sp.material.color.set(0xff6050);setTimeout(()=>{sp.material.color.set(0xffffff);invalidate()},450)}
+    if(bone&&i<64){const c=LMU.uLmC.value[i].clone();LMU.uLmC.value[i].set(RED.r,RED.g,RED.b);setTimeout(()=>{if(!it.done)LMU.uLmC.value[i].copy(c);invalidate()},500)}
+    else if(!bone&&!sp){const p=it.part;p.flash=-1;apply(p);setTimeout(()=>{p.flash=0;apply(p)},450)}}
+  invalidate()}
+function pqClick(h){if(!PQ.started||!h||h.pq===undefined||!PQ.queue.length)return;const want=PQ.queue[0],i=h.pq;
+  if(i===want){PQ.ok++;PQ.queue.shift();pqMark(i,true);if(PQ.hv===i){PQ.hv=-1;if(PQ.def.bone)LMU.uLmSel.value=-1;else setHover(null)}}
+  else{PQ.ko++;PQ.errs.add(want);pqMark(i,false);PQ.queue.push(PQ.queue.shift());toast('Non : c\'était « '+PQ.items[i].fr+' »')}
+  pqNext()}
+function pqNext(){invalidate();if(!PQ.queue.length){const pc=Math.round(PQ.ok/Math.max(1,PQ.ok+PQ.ko)*100);PQB[PQ.def.id]=Math.max(PQB[PQ.def.id]||0,pc);LS.set('pq',PQB);pqPaint(true)}else pqPaint()}
+function pqSkip(){if(!PQ.started||!PQ.queue.length)return;const w=PQ.queue.shift();PQ.ko++;PQ.errs.add(w);const it=PQ.items[w];toast('C\'était ici : « '+it.fr+' »');
+  if(PQ.def.bone){LMU.uLmSel.value=w;flyTo(it.s,Math.max(PQ.def.bone.radius*.5,.03),it.n,450);setTimeout(()=>{LMU.uLmSel.value=-1;invalidate()},1400)}else{const p=it.part;p.flash=-1;apply(p);setTimeout(()=>{p.flash=0;apply(p)},1200)}
+  PQ.queue.push(w);pqNext()}
+function pqErrs(){const d=PQ.def,ix=[...PQ.errs];if(!ix.length)return;
+  pqStart(d.bone?Object.assign({},d,{id:d.id+'|err',title:d.title+' · erreurs',lm:ix.map(i=>PQ.items[i].li)}):Object.assign({},d,{id:d.id+'|err',title:d.title+' · erreurs',parts:ix.map(i=>PQ.items[i].part)}))}
+// pastilles cachées derrière une structure : atténuées et non cliquables
+function pqUpdatePins(){if(!PQ.on||!PQ.pins.length)return;const pl=pickList(),k=.02*CFG.pin*THREE.MathUtils.clamp(camera.aspect*1.1,.6,1);
+  for(const sp of PQ.pins){_v.copy(sp.position).sub(camera.position);const d=_v.length();occRc.set(camera.position,_v.normalize());occRc.far=Math.max(0,d-.0015);occRc.firstHitOnly=true;
+    const occ=occRc.intersectObjects(pl,false).length>0;sp.userData.occ=occ;sp.material.opacity=occ?.28:1;sp.scale.setScalar(k*(occ?.72:sp.userData.done?.85:1))}}
+function pqQuit(toNav){pqClear();PQ.on=INPQ=false;document.body.classList.remove('inpq');$('#pq').classList.remove('on');parts.forEach(p=>p.flash=0);if(PQ.snap)restore(PQ.snap);
   if(PQ.cam)tw={t0:performance.now(),ms:500,p0:camera.position.clone(),p1:PQ.cam[0],q0:controls.target.clone(),q1:PQ.cam[1]};invalidate();if(toNav)navOpen('quiz')}
 $('#pqTop').addEventListener('click',e=>{const b=e.target.closest('[data-p]');if(!b)return;if(b.dataset.p==='quit')pqQuit(true);else pqStart(PQ.def)});
-$('#pq').addEventListener('click',e=>{const b=e.target.closest('[data-p]');if(!b)return;const a=b.dataset.p;if(a==='go'){PQ.started=true;pqPaint()}else if(a==='quit')pqQuit();else if(a==='nav')pqQuit(true);else pqStart(PQ.def)});
-$('#navBody').addEventListener('click',e=>{const b=e.target.closest('.ncard');if(b)NAV.cards[+b.dataset.i].go()});
+$('#pq').addEventListener('click',e=>{const b=e.target.closest('[data-p]');if(!b)return;const a=b.dataset.p;
+  if(a.startsWith('m:')){PQ.mode=a.slice(2);LS.set('pqmode',PQ.mode);pqStart(PQ.def)}else if(a==='go'){PQ.started=true;pqPaint()}else if(a==='skip')pqSkip();else if(a==='errs')pqErrs();else if(a==='quit')pqQuit();else if(a==='nav')pqQuit(true);else pqStart(PQ.def)});
+$('#navBody').addEventListener('click',e=>{const f=e.target.closest('[data-nf]'),m=e.target.closest('[data-nh]');
+  if(f){NAV.f=f.dataset.nf;navRender();return}
+  if(m){const a=m.dataset.nh;if(a==='last'){if(NAV.last)pqStart(NAV.last)}else{PQ.mode=a;LS.set('pqmode',a);navRender()}return}
+  const b=e.target.closest('.ncard');if(b)NAV.cards[+b.dataset.i].go()});
 $('#navBackBtn').onclick=()=>NAV.stack.length>1?navBack():navClose();$('#navClose').onclick=navClose;$('#navGrid').onclick=()=>{NAV.grid=!NAV.grid;LS.set('navgrid',NAV.grid);navRender()};
 $('#navSearch').oninput=e=>{NAV.q=e.target.value;navRender()};$('#navSearch').addEventListener('keydown',e=>e.stopPropagation());
 $$('#navTabs button').forEach(b=>b.onclick=()=>{NAV.mode=b.dataset.m;const d=NAV.stack.length;NAV.stack=[];navPush(pageHome())});
 // ------------------------------------------------------------------ démarrage
 SYS.forEach(sysRow);
+$('#curv button').onclick=()=>{setCurv();toast('Filtre de la vue retiré : les systèmes ajoutés s\'affichent en entier')};
 $$('#optList button').forEach(b=>{const k=b.dataset.opt;b.classList.toggle('on',!!OPT[k]);b.onclick=()=>{if(Q.on)return;OPT[k]=!OPT[k];LS.set('opt',OPT);b.classList.toggle('on',OPT[k]);
   loadExtra(k).then(()=>{for(const p of parts)if(p.mat===k||p.optKey===k||p.optNeg===k){p.hidden=defHidden(p);apply(p)}buildTree()})}});
 async function loadExtra(k){for(const s of SYS){if(!s.extra||!s.extra[k]||s.state!=='ready'||(s.xl&&s.xl[k])||!OPT[k])continue;s.xl=s.xl||{};s.xl[k]=1;
@@ -1077,4 +1250,4 @@ if(innerWidth<900)leftOpen(false);
   ground.position.set(c.x,b.min.y-.002,c.z);ground.userData.ready=true;applyCfg();
   invalidate();const sp=$('#splash');sp.style.opacity=0;setTimeout(()=>sp.remove(),520);
 })();
-window.__atlas={renderer,scene,THREE,parts,SYS,S,LM,Q,CAT,camera,controls,select,isolate,openLm,openIns,setSys,quizStart,invalidate};
+window.__atlas={renderer,scene,THREE,parts,SYS,S,LM,Q,PQ,NAV,CAT,camera,controls,select,isolate,openLm,openIns,setSys,quizStart,invalidate,pqStart,navOpen,applyView,VIEWS,quizSets,grpOf,SYSID,get CURV(){return CURV}};
