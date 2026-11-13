@@ -93,13 +93,14 @@ const pinG=new THREE.Group();scene.add(pinG);
 const controls=new OrbitControls(camera,canvas);
 controls.enableDamping=true;controls.dampingFactor=.14;controls.minDistance=.03;controls.maxDistance=12;controls.target.set(0,.9,0);controls.rotateSpeed=.9;
 let dirty=true;const invalidate=()=>{dirty=true};
-controls.addEventListener('change',invalidate);
+controls.addEventListener('change',()=>{invalidate();if(moving)lowRes()});
 const dprFor=()=>CFG.quality==='eco'?1:Math.min(devicePixelRatio||1,CFG.quality==='max'?3:MOBILE?1.5:2);
 let fullDpr=dprFor(),curDpr=fullDpr,moving=false,slow=0,lastT=0,restoreTimer=0;
 let visN=0,visDirty=true,lastZoom=0;
 function heavy(){if(visDirty){visN=0;for(const p of parts)if(p.sys.on&&!p.hidden)visN+=p.meshes.length;visDirty=false}return visN>900}
-function lowRes(){if(heavy()&&curDpr>1.25){curDpr=1.25;renderer.setPixelRatio(curDpr);renderer.setSize(innerWidth,innerHeight,false)}}
-controls.addEventListener('start',()=>{moving=true;clearTimeout(restoreTimer);hideTip();lowRes()});
+// changer la taille du canevas l'efface : on redessine aussitôt, et seulement quand la vue bouge vraiment (pas sur un simple clic)
+function lowRes(){if(heavy()&&curDpr>1.25){curDpr=1.25;renderer.setPixelRatio(curDpr);renderer.setSize(innerWidth,innerHeight,false);invalidate()}}
+controls.addEventListener('start',()=>{moving=true;clearTimeout(restoreTimer);hideTip()});
 controls.addEventListener('end',()=>{moving=false;restoreTimer=setTimeout(()=>{invalidate();if(curDpr!==fullDpr){curDpr=fullDpr;renderer.setPixelRatio(curDpr);resize()}},260)});
 let booted=false;
 function resize(){const w=innerWidth,h=innerHeight;if(!w||!h)return;renderer.setPixelRatio(curDpr);renderer.setSize(w,h,false);if(camera.view)camera.clearViewOffset();camera.aspect=w/h;camera.updateProjectionMatrix();invalidate();if(booted)sheetOffset()}
