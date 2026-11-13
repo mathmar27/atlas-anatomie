@@ -709,13 +709,17 @@ function partOpen(p){if(p.openR!==undefined)return p.openR;const key=new Map(),E
 function capMatOf(mt){if(!mt.userData.capM){const m=new THREE.MeshBasicMaterial({side:THREE.DoubleSide,stencilWrite:true,stencilRef:0,stencilFunc:THREE.NotEqualStencilFunc,
   stencilFail:THREE.ReplaceStencilOp,stencilZFail:THREE.ReplaceStencilOp,stencilZPass:THREE.ReplaceStencilOp});m.color=mt.color;m.userData.kind=mt.userData.kind|0;m.polygonOffset=true;m.polygonOffsetFactor=0;m.polygonOffsetUnits=-(capPri(m.userData.kind)*6+(mt.id%5));
   m.onBeforeCompile=capCompile;m.customProgramCacheKey=function(){return'cap'+this.userData.kind};mt.userData.capM=m}return mt.userData.capM}
+const _hsl={h:0,s:0,l:0};
+function capMatP(p,mt){if(!p._capM){const b=capMatOf(mt),m=b.clone();m.userData.kind=b.userData.kind;m.onBeforeCompile=capCompile;m.customProgramCacheKey=b.customProgramCacheKey;m.polygonOffset=true;m.polygonOffsetFactor=0;m.polygonOffsetUnits=b.polygonOffsetUnits;
+  const h=hash(p.base),r=k=>((Math.imul(h^(k*2654435761),2246822507)>>>0)%1000)/1000,bone=(mt.userData.kind|0)===0&&p.sys.id==='squelette';
+  m.color=b.color.clone();m.color.getHSL(_hsl);const a=bone?.35:1;m.color.setHSL((_hsl.h+(r(1)-.5)*.045*a+1)%1,Math.min(1,_hsl.s*(.85+r(2)*.3*a)),Math.max(.12,Math.min(.88,_hsl.l*(1+(r(3)-.5)*.42*a))));p._capM=m}return p._capM}
 function rebuildCaps(){capsDirty=false;for(const p of parts)p.capped=false;for(const c of capG.children.slice())capG.remove(c);if(!clip.on)return;
   const n=clip.plane.normal,q=new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0,0,1),n),c=new THREE.Vector3(),sz=new THREE.Vector3();let ro=10;
   for(const p of parts){if(!p.sys.on||p.hidden||p.ghost||p.ins||p.sys.id==='regions')continue;const bb=pbox(p);if(!clip.plane.intersectsBox(bb))continue;
     if(/intercostal|^Transversus thoracis|^Subcostal|^Levatores/.test(p.base)||partOpen(p)>.03)continue;
     let dom=p.meshes[0];for(const m of p.meshes)if(m.geometry.attributes.position.count>dom.geometry.attributes.position.count)dom=m;if((dom.material.userData.kind|0)===4)continue;
     for(const m of p.meshes)for(const mat of[sBack,sFront]){const s=new THREE.Mesh(m.geometry,mat);s.matrixAutoUpdate=false;s.matrix.copy(m.matrixWorld);s.renderOrder=ro;s.raycast=()=>{};capG.add(s)}
-    const cap=new THREE.Mesh(quadG,capMatOf(dom.material));bb.getCenter(c);clip.plane.projectPoint(c,cap.position);cap.position.addScaledVector(n,2e-4);cap.quaternion.copy(q);
+    const cap=new THREE.Mesh(quadG,capMatP(p,dom.material));bb.getCenter(c);clip.plane.projectPoint(c,cap.position);cap.position.addScaledVector(n,2e-4);cap.quaternion.copy(q);
     cap.scale.setScalar(bb.getSize(sz).length()*1.02);cap.renderOrder=ro+1;cap.raycast=()=>{};capG.add(cap);p.capped=true;p.capPri=capPri(dom.material.userData.kind|0);ro+=2}
   capG.updateMatrixWorld(true);invalidate()}
 function updClip(){capsDirty=true;const a=clip.axis,k=+$('#clipPos').value/1000,v=clip.box.min[a]+(clip.box.max[a]-clip.box.min[a])*k,s=clip.flip?1:-1;
