@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
 <meta name="mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="theme-color" content="#0b1114">
 <title>Atlas — anatomie 3D</title>
-<link rel="icon" href="logo.svg?v=3" type="image/svg+xml"><link rel="apple-touch-icon" href="icon-180.png?v=3"><link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="logo.png?v=4" type="image/png"><link rel="apple-touch-icon" href="icon-180.png?v=4"><link rel="manifest" href="manifest.webmanifest">
 <style>
 :root{
   --bg0:#0b1114;--bg1:#16242a;--panel:rgba(16,25,29,.82);--panel2:rgba(255,255,255,.045);--panel3:rgba(255,255,255,.09);
@@ -239,7 +239,7 @@ select option{color:#111}
 <div id="loader"></div>
 
 <aside id="left" class="panel">
-  <div id="brand"><img class="logo" src="logo.svg?v=3" alt=""><b class="wm">Atlas</b>
+  <div id="brand"><img class="logo" src="logo.png?v=4" alt=""><b class="wm">Atlas</b>
     <button id="closeLeft" title="Replier le panneau">‹</button></div>
   <div id="searchWrap">
     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
@@ -307,13 +307,13 @@ select option{color:#111}
 </table></div></aside>
 <aside id="settings" class="panel"><div id="setHead"><b>Réglages</b><button id="setClose" class="ghost">×</button></div><div id="setBody" class="scroll"></div></aside>
 <div id="tip"></div><div id="toast" class="panel"></div>
-<div id="splash"><div><img class="logo" src="logo.svg?v=3" alt=""><br><b class="wm">Atlas</b><p id="splashMsg">Chargement du squelette…</p></div></div>
+<div id="splash"><div><img class="logo" src="logo.png?v=4" alt=""><br><b class="wm">Atlas</b><p id="splashMsg">Chargement du squelette…</p></div></div>
 
 <script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"}}</script>
 <script>
 window.addEventListener('error',e=>{const m=document.getElementById('splashMsg');if(m&&document.getElementById('splash').style.opacity!=='0'){m.className='err';
   m.textContent=location.protocol==='file:'?"Ouvre l'appli avec « Lancer l'atlas.command » (double-clic), pas en ouvrant index.html directement.":'Erreur de chargement : '+(e.message||'réseau')}} ,true);
 </script>
-<script type="module" src="app.js?v=70"></script>
+<script type="module" src="app.js?v=71"></script>
 </body>
 </html>
