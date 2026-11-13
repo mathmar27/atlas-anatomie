@@ -1,5 +1,5 @@
 // Atlas 3D — cache hors ligne : page et données en « réseau d'abord », modèles et scripts en « cache puis mise à jour »
-const C='atlas-v1';
+const C='atlas-v2';
 self.addEventListener('install',()=>self.skipWaiting());
 self.addEventListener('activate',e=>e.waitUntil(self.clients.claim()));
 self.addEventListener('fetch',e=>{const r=e.request;if(r.method!=='GET')return;const u=new URL(r.url),own=u.origin===location.origin,cdn=u.hostname==='cdn.jsdelivr.net';if(!own&&!cdn)return;

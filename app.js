@@ -1092,7 +1092,9 @@ function ctxOf(s,c){if(s.id==='squelette')return{solid:[],gh:[]};let solid=nearB
     gh.sort((a,b2)=>a.center.distanceTo(bc)-b2.center.distanceTo(bc));gh.length=Math.min(gh.length,30)}
   // os qui cachent la cible vue de face (cage thoracique, voûte du crâne…) : estompés au lieu d'être pleins
   if(s.id==='vaisseaux'||s.id==='nerfs'||s.id==='visceres'){const d=new THREE.Vector3(.3,.1,1).normalize(),rr=new THREE.Raycaster(),hid=new Set(),ms=solid.flatMap(q=>q.meshes);
-    for(const p of c){rr.set(p.center,d);for(const h of rr.intersectObjects(ms,false))hid.add(h.object.userData.part)}
+    const v=new THREE.Vector3(),dirs=[d,new THREE.Vector3(0,.1,1).normalize()];rr.firstHitOnly=false;
+    for(const p of c)for(const m of p.meshes){const P=m.geometry.attributes.position,st=Math.max(1,Math.floor(P.count/6));
+      for(let i=0;i<P.count;i+=st){v.fromBufferAttribute(P,i).applyMatrix4(m.matrixWorld);for(const dd of dirs){rr.set(v,dd);for(const h of rr.intersectObjects(ms,false))hid.add(h.object.userData.part)}}}
     if(hid.size){for(const q of hid)gh.push(q);solid=solid.filter(q=>!hid.has(q))}}
   return{solid,gh}}
 // vignettes : rendu hors écran de la structure, mis en cache
