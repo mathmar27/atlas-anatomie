@@ -341,6 +341,7 @@ function pickParts(){
   for(const h of hits){if(clip.on&&clip.plane.distanceToPoint(h.point)<0)continue;if(clip.on&&h.face&&h.face.normal.clone().transformDirection(h.object.matrixWorld).dot(rc.ray.direction)>0&&!h.object.userData.part.capped)continue;return{part:h.object.userData.part,point:h.point}}
   return null}
 let down=null,hovRaf=0,lastMove=null;
+canvas.addEventListener('contextmenu',e=>e.preventDefault());addEventListener('dragstart',e=>{if(e.target.tagName==='IMG'||e.target===canvas)e.preventDefault()});addEventListener('selectstart',e=>{const t=e.target.nodeType===3?e.target.parentElement:e.target;if(!t||!t.closest||!t.closest('input,textarea,#desc,.note'))e.preventDefault()});
 canvas.addEventListener('pointerdown',e=>{down={x:e.clientX,y:e.clientY,b:e.button};$('#results').classList.remove('on')});
 canvas.addEventListener('pointerup',e=>{if(!down)return;const d=Math.hypot(e.clientX-down.x,e.clientY-down.y),b=down.b;down=null;if(d<5&&b===0)onClick(e)});
 canvas.addEventListener('pointermove',e=>{lastMove=e;if(e.buttons||moving)return;if(!hovRaf)hovRaf=requestAnimationFrame(()=>{hovRaf=0;onHover(lastMove)})});
