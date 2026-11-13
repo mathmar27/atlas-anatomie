@@ -803,13 +803,14 @@ async function loadView(v){if(Q.on)return;for(const k of v.opt||[])await enableO
   tw={t0:performance.now(),ms:700,p0:camera.position.clone(),p1:new THREE.Vector3(...v.cam.slice(0,3)),q0:controls.target.clone(),q1:new THREE.Vector3(...v.cam.slice(3))};invalidate();if(innerWidth<=820)leftOpen(false)}
 $('#pane-views').addEventListener('click',e=>{const m=e.target.closest('button');if(m&&m.id==='mvSave'){saveView();return}if(m&&m.dataset.mvdel!==undefined){MYV.splice(+m.dataset.mvdel,1);LS.set('myviews',MYV);viewsPane();return}if(m&&m.dataset.mv!==undefined){loadView(MYV[+m.dataset.mv]);return}
   const b=e.target.closest('[data-v]');if(!b)return;const [i,j]=b.dataset.v.split('.');applyView(VIEWS[i][1][j])});
+const EXM=/intercostal|platysma|abdominal part|rectus abdominis|oblique|serratus posterior|sternocleido|erector|multifid/i;
 async function applyView(V){
   if(Q.on)return;const v=V[1],ids=v.sys||['squelette','articulations'],all=v.ctx?ids.concat('squelette'):ids;
   toast('Chargement de la vue « '+V[0]+' »…');for(const id of all)try{await loadSys(SYSID[id])}catch{return}
   pushUndo();exOff();closeLm();if(INS.owner)closeIns(true);select(null);
   let c=null;if(v.sph){const b=parts.find(p=>p.name===v.sph[0]);pbox(b);c=new THREE.Vector3((b.box.min.x+b.box.max.x)/2,(v.sph[1]?b.box.max.y-.02:b.box.min.y)+(v.sph[3]||0),(b.box.min.z+b.box.max.z)/2+(v.sph[4]||0))}
   SYS.forEach(s=>{if(!s.internal)s.on=all.includes(s.id)});
-  const zone=p=>{pbox(p);return c?(p.box.distanceToPoint(c)<v.sph[2]*.5||p.center.distanceTo(c)<v.sph[2]):v.box?(p.center.y>=v.box[0]*SCL&&p.center.y<=v.box[1]*SCL&&(!v.ax||Math.abs(p.center.x)<v.ax)):v.re.test(p.name)};
+  const zone=p=>{pbox(p);if(c&&p.sys.id==='muscles'&&EXM.test(p.name))return false;return c?(p.box.distanceToPoint(c)<v.sph[2]*.5||p.center.distanceTo(c)<v.sph[2]):v.box?(p.center.y>=v.box[0]*SCL&&p.center.y<=v.box[1]*SCL&&(!v.ax||Math.abs(p.center.x)<v.ax)):v.re.test(p.name)};
   for(const p of parts){p.ghost=false;if(p.ins){p.hidden=true;continue}if(!p.sys.on)continue;pbox(p);
     if(v.ctx&&p.sys.id==='squelette'&&!ids.includes('squelette')){p.hidden=false;p.ghost=true;continue}
     p.hidden=!zone(p)||defHidden(p)}
@@ -1136,7 +1137,7 @@ function navPush(pg){const cur=NAV.stack[NAV.stack.length-1];if(cur)cur.sc=$('#n
 function navBack(){NAV.stack.pop();NAV.q='';$('#navSearch').value='';navRender()}
 function navClose(){NAV.stack=[];navRender()}
 function viewZone(V){const v=V[1];let c=null;if(v.sph){const b=parts.find(p=>p.name===v.sph[0]);if(!b)return null;pbox(b);c=new THREE.Vector3((b.box.min.x+b.box.max.x)/2,(v.sph[1]?b.box.max.y-.02:b.box.min.y)+(v.sph[3]||0),(b.box.min.z+b.box.max.z)/2+(v.sph[4]||0))}
-  return p=>{pbox(p);return c?(p.box.distanceToPoint(c)<v.sph[2]*.5||p.center.distanceTo(c)<v.sph[2]):v.box?(p.center.y>=v.box[0]*SCL&&p.center.y<=v.box[1]*SCL&&(!v.ax||Math.abs(p.center.x)<v.ax)):v.re.test(p.name)}}
+  return p=>{pbox(p);if(c&&p.sys.id==='muscles'&&EXM.test(p.name))return false;return c?(p.box.distanceToPoint(c)<v.sph[2]*.5||p.center.distanceTo(c)<v.sph[2]):v.box?(p.center.y>=v.box[0]*SCL&&p.center.y<=v.box[1]*SCL&&(!v.ax||Math.abs(p.center.x)<v.ax)):v.re.test(p.name)}}
 function zoneCard(V){const v=V[1],ids=v.sys||['squelette','articulations'],ss=ids.map(id=>SYSID[id]).filter(Boolean),wait=ss.find(x=>x.state!=='ready'),sub=ss.map(x=>SHORT[x.id]||x.label).join(' · ').replace('Système squelettique','Os');
   let ps=null;if(!wait){const z=viewZone(V);if(z){ps=[];for(const x of ss)for(const p of x.parts)if(!p.ins&&p.side!=='l'&&!defHidden(p)&&z(p))ps.push(p)}}
   return{t:V[0],sub,k:'v|'+V[0],ps,sys:wait,go:()=>{navClose();applyView(V)}}}
