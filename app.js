@@ -360,7 +360,7 @@ function onClick(e){
   const h=pick(e);
   if(PQ.on){pqClick(h);return}
   if(Q.on){quizClick(h);return}
-  if(h&&h.lm!==undefined){selectLm(h.lm,true);return}
+  if(h&&h.lm!==undefined){if(!S.sel&&LM.bone)select(LM.bone);selectLm(h.lm,true);return}
   if((e.shiftKey||e.metaKey||e.ctrlKey||MULTI)&&h&&h.part){toggleMulti(h.part);return}
   if((EX.on||EX.arm)&&h&&h.part&&h.point){exClick(h);select(h.part);return}
   if(DIS&&h&&h.part){pushUndo();const p=h.part;p.hidden=true;apply(p);if(S.sel===p)select(null);setHover(null);hideTip();buildTree();return}
@@ -383,7 +383,7 @@ function undo(){if(Q.on)return;const s=undoStack.pop();if(!s){toast('Rien à ann
 function select(p,fly){
   if(S.multi.size){const a=[...S.multi];S.multi.clear();a.forEach(apply)}
   const o=S.sel;if(o===p){if(fly&&p)focusSel();card();return}
-  if(LM.bone&&LM.bone!==p)closeLm();
+  if(p&&LM.bone&&LM.bone!==p)closeLm();
   if(INS.owner&&INS.owner!==p&&!(p&&p.ins))closeIns();
   S.sel=p;if(o)apply(o);if(p)apply(p);card();markTree();if(fly&&p)focusSel()}
 function focusSel(){const p=S.sel;if(!p)return;pbox(p);flyTo(p.exOff?p.center.clone().add(p.exOff):p.center,Math.max(p.radius*1.25,.035))}
@@ -739,7 +739,7 @@ addEventListener('keydown',e=>{
   if(k==='n'){navOpen();return}
   if(k==='/'){e.preventDefault();leftOpen(true);$('#search').focus()}
   else if(k==='?'){toggleHelp()}
-  else if(k==='escape'){if($('#help').classList.contains('on'))toggleHelp(false);else if($('#settings').classList.contains('on'))$('#setClose').click();else if(EX.on||EX.arm)setExplode(false);else if(DIS)setDis(false);else if(clip.on)setClip(false);else if(LM.sel>=0)selectLm(-1);else select(null)}
+  else if(k==='escape'){if($('#help').classList.contains('on'))toggleHelp(false);else if($('#settings').classList.contains('on'))$('#setClose').click();else if(EX.on||EX.arm)setExplode(false);else if(DIS)setDis(false);else if(clip.on)setClip(false);else if(LM.sel>=0)selectLm(-1);else if(S.sel)select(null);else if(LM.bone){closeLm();card()}}
   else if(k==='e'){if(EX.on||EX.arm)setExplode(false);else if(S.sel&&!S.sel.ins)explodeAround();else setExplode(true)}else if(k==='d')setDis(!DIS)
   else if(/^[1-5]$/.test(k)&&!e.altKey)viewDir(['ant','post','d','g','sup'][+k-1]);
   else if(k==='z'&&e.shiftKey||k==='y')redo();
@@ -1135,11 +1135,19 @@ function navOpen(mode){if(Q.on||PQ.on)return;if(mode)NAV.mode=mode;NAV.on=true;N
 function navPush(pg){const cur=NAV.stack[NAV.stack.length-1];if(cur)cur.sc=$('#navBody').scrollTop;NAV.stack.push(pg);navRender()}
 function navBack(){NAV.stack.pop();NAV.q='';$('#navSearch').value='';navRender()}
 function navClose(){NAV.stack=[];navRender()}
-function pageHome(){const qz=NAV.mode==='quiz',extra=qz?[{t:'Autres quiz',cards:MODES.map(m=>({t:m[1],sub:m[2],col:'var(--panel3)',go:()=>{navClose();Q.mode=m[0];quizStart()}}))}]
-   :VIEWS.slice(0,1).concat(VIEWS.slice(2)).map(g=>({t:g[0],cards:g[1].map(v=>({t:v[0],col:'var(--panel3)',go:()=>{navClose();applyView(v)}}))})).concat([{t:'Mes vues',cards:MYV.map(v=>({t:v.n,col:'var(--panel3)',go:()=>{navClose();loadView(v)}})).concat([{t:'+ Enregistrer la vue actuelle',col:'var(--panel3)',go:()=>{saveView();navClose()}}])}]);
-  return{t:qz?'Quiz':'Atlas d\'anatomie',head:qz,secs:NSYS.map(([id,lab])=>{const s=SYSID[id],rd=s.state==='ready';return{t:lab,cards:NREG.map(([r,rl])=>{const ps=rd?regParts(s,r):null;let sub='',prog='';
+function viewZone(V){const v=V[1];let c=null;if(v.sph){const b=parts.find(p=>p.name===v.sph[0]);if(!b)return null;pbox(b);c=new THREE.Vector3((b.box.min.x+b.box.max.x)/2,(v.sph[1]?b.box.max.y-.02:b.box.min.y)+(v.sph[3]||0),(b.box.min.z+b.box.max.z)/2+(v.sph[4]||0))}
+  return p=>{pbox(p);return c?(p.box.distanceToPoint(c)<v.sph[2]*.5||p.center.distanceTo(c)<v.sph[2]):v.box?(p.center.y>=v.box[0]*SCL&&p.center.y<=v.box[1]*SCL&&(!v.ax||Math.abs(p.center.x)<v.ax)):v.re.test(p.name)}}
+function zoneCard(V){const v=V[1],ids=v.sys||['squelette','articulations'],ss=ids.map(id=>SYSID[id]).filter(Boolean),wait=ss.find(x=>x.state!=='ready'),sub=ss.map(x=>SHORT[x.id]||x.label).join(' · ').replace('Système squelettique','Os');
+  let ps=null;if(!wait){const z=viewZone(V);if(z){ps=[];for(const x of ss)for(const p of x.parts)if(!p.ins&&p.side!=='l'&&!defHidden(p)&&z(p))ps.push(p)}}
+  return{t:V[0],sub,k:'v|'+V[0],ps,sys:wait,go:()=>{navClose();applyView(V)}}}
+function pageHome(){const qz=NAV.mode==='quiz',extra=qz?[{t:'Autres quiz',cards:MODES.map(m=>({t:m[1],sub:m[2],col:'var(--panel3)',go:()=>{navClose();Q.mode=m[0];quizStart()}}))}]:[];
+  const bySys=NSYS.map(([id,lab])=>{const s=SYSID[id],rd=s.state==='ready';return{t:qz?lab:lab+' · par région',cards:NREG.map(([r,rl])=>{const ps=rd?regParts(s,r):null;let sub='',prog='';
       if(rd&&ps.length){if(qz){const Q2=quizSets(s,r),n=Q2.sets.length,d=Q2.sets.filter(x=>PQB[x.id]!==undefined).length,gs=new Set(Q2.sets.map(x=>x.g)).size;sub=n+' quiz · '+gs+' groupe'+(gs>1?'s':'');if(d)prog=d+' / '+n}else sub=ps.length+' structures'}
-      return{t:rl,sub,prog,k:id+'|'+r,ps,ctx:id!=='squelette'&&rd?regParts(SYSID.squelette,r):null,sys:s,go:async()=>{toast('Chargement…');try{await loadSys(s)}catch{return}navPush(pageRegion(s,r,rl))}}}).filter(c=>!c.ps||c.ps.length)}}).concat(extra)}}
+      return{t:rl,sub,prog,k:id+'|'+r,ps,ctx:id!=='squelette'&&rd?regParts(SYSID.squelette,r):null,sys:s,go:async()=>{toast('Chargement…');try{await loadSys(s)}catch{return}navPush(pageRegion(s,r,rl))}}}).filter(c=>!c.ps||c.ps.length)}});
+  if(qz)return{t:'Quiz',head:true,secs:bySys.concat(extra)};
+  const zones=VIEWS.map(g=>({t:g[0],cards:g[1].map(zoneCard)}));
+  zones.push({t:'Mes vues',cards:MYV.map(v=>({t:v.n,col:'var(--panel3)',go:()=>{navClose();loadView(v)}})).concat([{t:'+ Enregistrer la vue actuelle',col:'var(--panel3)',go:()=>{saveView();navClose()}}])});
+  return{t:'Atlas d\'anatomie',secs:zones.concat(bySys.map(x=>({...x,t:x.t})))}}
 function uniq(ps){const m=new Map();for(const p of ps){if(p.side==='l')continue;if(!m.has(p.base))m.set(p.base,p)}return[...m.values()].sort((a,b)=>title(a).localeCompare(title(b),'fr'))}
 const chunks=(a,n)=>{const o=[];for(let i=0;i<a.length;i+=n)o.push(a.slice(i,i+n));if(o.length>1&&o[o.length-1].length<4)o[o.length-2].push(...o.pop());return o};
 const regPred=r=>p=>regOf(p)===r&&!((r==='ms'||r==='mi')&&p.side==='l');
